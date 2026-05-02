@@ -129,7 +129,7 @@ export function getNodeByPath(root: MindMapNode, path: number[]): MindMapNode {
 
 export async function applyWebviewMessage(
   document: vscode.TextDocument,
-  message: Exclude<WebviewMessage, { type: 'ready' | 'undo' | 'redo' }>,
+  message: Exclude<WebviewMessage, { type: 'ready' | 'undo' | 'redo' | 'exportPng' | 'exportPngResult' | 'exportPngError' }>,
 ): Promise<OperationResult> {
   const parsed = parseDocument(document.getText());
   const path = 'path' in message ? parsePath(message.path) : [];

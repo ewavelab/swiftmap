@@ -62,6 +62,12 @@
         "title": "SwiftMap: Open Visual Editor",
         "shortTitle": "Open Visual Editor",
         "icon": "$(open-preview)"
+      },
+      {
+        "command": "swiftmap.exportPng",
+        "title": "SwiftMap: Export PNG",
+        "shortTitle": "Export PNG",
+        "icon": "$(export)"
       }
     ],
     "menus": {
@@ -74,6 +80,11 @@
         {
           "command": "swiftmap.openVisualEditor",
           "when": "editorLangId == swiftmap && activeCustomEditorId != swiftmap.editor",
+          "group": "navigation"
+        },
+        {
+          "command": "swiftmap.exportPng",
+          "when": "activeCustomEditorId == swiftmap.editor",
           "group": "navigation"
         }
       ]

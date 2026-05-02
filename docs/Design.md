@@ -65,6 +65,10 @@ General features:
     - The visual editor should provide an icon action for this
  - It should be possible to open the visual editor for the current `.swiftmap` file from the text editor
     - The text editor should provide an icon action for this
+ - It should be possible to export the current mind map from the visual editor as a PNG image
+    - The visual editor should provide an icon action for this
+    - Export should offer a choice between expanding all nodes and preserving the current collapsed state
+    - Export should prompt the user for a save location and write a `.png` file
 
 ## File Format
 

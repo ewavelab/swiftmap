@@ -98,7 +98,7 @@
       }
     }
 
-    function layoutTree(root) {
+    function layoutTree(root, getHeight = getNodeHeight) {
       const layoutByPath = new Map();
       let cursorY = 0;
 
@@ -112,7 +112,7 @@
 
       function visit(node, depth, parentPath) {
         const x = depth * (layoutConfig.nodeWidth + layoutConfig.horizontalGap);
-        const height = getNodeHeight(node.path, node);
+        const height = getHeight(node.path, node);
         if (!node.children.length || node.collapsed) {
           const y = cursorY;
           cursorY += height + layoutConfig.verticalGap;
@@ -151,6 +151,16 @@
 
       visit(root, 0, null);
       return layoutByPath;
+    }
+
+    function cloneTreeExpanded(node) {
+      return {
+        path: node.path,
+        name: node.name,
+        collapsed: false,
+        flags: [...node.flags],
+        children: node.children.map((child) => cloneTreeExpanded(child)),
+      };
     }
 
     function setSingleSelection(path) {
@@ -469,6 +479,7 @@
         { label: 'Edit', icon: '✎', run: () => startEdit(path) },
         { label: 'Copy text', icon: '📋', run: () => post({ type: 'copyNodeText', path }) },
         { label: 'Paste text', icon: '📋', run: () => post({ type: 'pasteNodeText', path }) },
+        { label: 'Export PNG...', icon: '🖼', run: () => post({ type: 'exportPng' }) },
         { label: 'Undo', icon: '↶', run: () => post({ type: 'undo' }) },
         { label: 'Redo', icon: '↷', run: () => post({ type: 'redo' }) },
       ]);
@@ -691,6 +702,374 @@
       return Math.max(layoutConfig.nodeHeight, 16 + nameHeight + flagsHeight);
     }
 
+    function getExportNodeHeight(ctx, path, node) {
+      const hasChildren = node.children.length > 0;
+      const textXOffset = hasChildren ? 34 : 10;
+      const textMaxWidth = layoutConfig.nodeWidth - textXOffset - 10;
+      const textLines = wrapText(ctx, node.name || ' ', textMaxWidth);
+      const badges = getFlagBadgeDefinitions(node.flags);
+      const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
+      ctx.save();
+      ctx.font = badgeFont;
+      const badgeRows = countBadgeRows(ctx, badges, textMaxWidth);
+      ctx.restore();
+      const flagsHeight = badgeRows > 0 ? badgeRows * 19 : 0;
+      return Math.max(layoutConfig.nodeHeight, 16 + textLines.length * 16 + flagsHeight);
+    }
+
+    function readCssVar(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function getExportColors() {
+      return {
+        bg: readCssVar('--bg') || '#ffffff',
+        fg: readCssVar('--fg') || '#111111',
+        muted: readCssVar('--muted') || '#666666',
+        surface: readCssVar('--surface') || '#f5f5f5',
+        surfaceActive: readCssVar('--surface-active') || '#e8eefc',
+        border: readCssVar('--border') || '#d0d0d0',
+        accent: readCssVar('--accent') || '#2f6feb',
+        done: readCssVar('--done') || '#2ea043',
+        rejected: readCssVar('--rejected') || '#cf222e',
+        question: readCssVar('--question') || '#1f6feb',
+        task: readCssVar('--task') || '#7c3aed',
+        idea: readCssVar('--idea') || '#d29922',
+        priorityLow: readCssVar('--priority-low') || '#8b949e',
+        priorityMedium: readCssVar('--priority-medium') || '#d29922',
+        priorityHigh: readCssVar('--priority-high') || '#fb8500',
+        shadow: 'rgba(0, 0, 0, 0.18)',
+        collapseBg: readCssVar('--collapse-bg') || '',
+        collapseBorder: readCssVar('--collapse-border') || '',
+      };
+    }
+
+    function waitForFonts() {
+      if (document.fonts && document.fonts.ready) {
+        return document.fonts.ready.catch(() => undefined);
+      }
+      return Promise.resolve();
+    }
+
+    function wrapText(ctx, text, maxWidth) {
+      const source = text || ' ';
+      const words = source.split(/\s+/).filter(Boolean);
+      if (words.length === 0) {
+        return [' '];
+      }
+
+      const lines = [];
+      let current = '';
+
+      function pushCurrent() {
+        if (current) {
+          lines.push(current);
+          current = '';
+        }
+      }
+
+      function splitLongWord(word) {
+        let chunk = '';
+        for (const char of word) {
+          if (ctx.measureText(chunk + char).width <= maxWidth || chunk.length === 0) {
+            chunk += char;
+          } else {
+            lines.push(chunk);
+            chunk = char;
+          }
+        }
+        if (chunk) {
+          current = chunk;
+        }
+      }
+
+      for (const word of words) {
+        const candidate = current ? current + ' ' + word : word;
+        if (ctx.measureText(candidate).width <= maxWidth) {
+          current = candidate;
+          continue;
+        }
+        pushCurrent();
+        if (ctx.measureText(word).width <= maxWidth) {
+          current = word;
+        } else {
+          splitLongWord(word);
+        }
+      }
+
+      pushCurrent();
+      return lines.length > 0 ? lines : [source];
+    }
+
+    function getFlagBadgeDefinitions(flags) {
+      return [
+        flags.includes(1) ? { label: '✓ Done', color: getExportColors().done } : null,
+        flags.includes(2) ? { label: '✕ Rejected', color: getExportColors().rejected } : null,
+        flags.includes(3) ? { label: '? Question', color: getExportColors().question } : null,
+        flags.includes(4) ? { label: '☰ Task', color: getExportColors().task } : null,
+        flags.includes(5) ? { label: '💡 Idea', color: getExportColors().idea } : null,
+        flags.includes(6) ? { label: 'Low priority', color: getExportColors().priorityLow } : null,
+        flags.includes(7) ? { label: 'Medium priority', color: getExportColors().priorityMedium } : null,
+        flags.includes(8) ? { label: 'High priority', color: getExportColors().priorityHigh } : null,
+      ].filter(Boolean);
+    }
+
+    function countBadgeRows(ctx, badges, availableWidth) {
+      let rows = 0;
+      let currentWidth = 0;
+      const gap = 6;
+      for (const badge of badges) {
+        const badgeWidth = ctx.measureText(badge.label).width + 14;
+        if (currentWidth > 0 && currentWidth + badgeWidth > availableWidth) {
+          rows += 1;
+          currentWidth = 0;
+        }
+        if (currentWidth === 0) {
+          currentWidth = badgeWidth;
+        } else {
+          currentWidth += gap + badgeWidth;
+        }
+      }
+      if (currentWidth > 0) {
+        rows += 1;
+      }
+      return rows;
+    }
+
+    function measureExportNode(ctx, node, hasChildren) {
+      const textXOffset = hasChildren ? 34 : 10;
+      const textMaxWidth = layoutConfig.nodeWidth - textXOffset - 10;
+      const textLines = wrapText(ctx, node.name || ' ', textMaxWidth);
+      const badges = getFlagBadgeDefinitions(node.flags);
+      const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
+      ctx.save();
+      ctx.font = badgeFont;
+      const badgeRows = countBadgeRows(ctx, badges, textMaxWidth);
+      ctx.restore();
+      return {
+        textLines,
+        badgeRows,
+        height: Math.max(layoutConfig.nodeHeight, 16 + textLines.length * 16 + (badgeRows > 0 ? badgeRows * 19 : 0)),
+      };
+    }
+
+    function renderExportNode(ctx, node, layout, colors, offsetX, offsetY) {
+      const x = layout.x + offsetX;
+      const y = layout.y + offsetY;
+      const width = layoutConfig.nodeWidth;
+      const height = layout.height;
+      const rootNode = node.path === '0';
+      const collapsed = node.collapsed;
+      const hasChildren = node.children.length > 0;
+
+      ctx.save();
+      ctx.shadowColor = colors.shadow;
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetY = 4;
+      ctx.fillStyle = rootNode ? colors.surfaceActive : colors.surface;
+      ctx.strokeStyle = rootNode ? colors.accent : colors.border;
+      ctx.lineWidth = 1;
+      roundRect(ctx, x, y, width, height, 12);
+      ctx.fill();
+      ctx.shadowColor = 'transparent';
+      ctx.stroke();
+
+      ctx.fillStyle = colors.fg;
+      ctx.font = '600 12px ' + getComputedStyle(document.body).fontFamily;
+      ctx.textBaseline = 'top';
+
+      let textX = x + 10;
+      if (hasChildren) {
+        ctx.fillStyle = withAlpha(colors.bg, 0.86);
+        ctx.strokeStyle = withAlpha(colors.fg, 0.18);
+        ctx.lineWidth = 1;
+        roundRect(ctx, x + 10, y + 8, 18, 18, 5);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = colors.muted;
+        ctx.font = '700 13px ' + getComputedStyle(document.body).fontFamily;
+        ctx.textAlign = 'center';
+        ctx.fillText(collapsed ? '+' : '−', x + 19, y + 10);
+        ctx.textAlign = 'left';
+        textX += 24;
+      }
+
+      const textMetrics = measureExportNode(ctx, node, hasChildren);
+      ctx.fillStyle = colors.fg;
+      ctx.font = '12px ' + getComputedStyle(document.body).fontFamily;
+      const lineHeight = 16;
+      const textTop = y + 10;
+      const textWidth = width - (textX - x) - 10;
+      const textLines = wrapText(ctx, node.name || ' ', textWidth);
+      for (let index = 0; index < textLines.length; index += 1) {
+        ctx.fillText(textLines[index], textX, textTop + index * lineHeight);
+      }
+
+      const badges = getFlagBadgeDefinitions(node.flags);
+      if (badges.length > 0) {
+        const badgeTop = textTop + textLines.length * lineHeight + 6;
+        const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
+        ctx.font = badgeFont;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        let badgeX = textX;
+        let badgeY = badgeTop;
+        const badgeGapX = 6;
+        const badgeGapY = 5;
+        const maxBadgeWidth = width - (textX - x) - 10;
+        let rowWidth = 0;
+        let rowHeight = 14;
+        for (let index = 0; index < badges.length; index += 1) {
+          const badge = badges[index];
+          const badgeWidth = ctx.measureText(badge.label).width + 14;
+          if (badgeX !== textX && rowWidth + badgeWidth > maxBadgeWidth) {
+            badgeX = textX;
+            badgeY += rowHeight + badgeGapY;
+            rowWidth = 0;
+          }
+
+          ctx.fillStyle = withAlpha(colors.bg, 0.80);
+          ctx.strokeStyle = withAlpha(colors.fg, 0.12);
+          ctx.lineWidth = 1;
+          roundRect(ctx, badgeX, badgeY, badgeWidth, 14, 999);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = badge.color;
+          ctx.fillText(badge.label, badgeX + 7, badgeY + 7);
+          rowWidth = rowWidth === 0 ? badgeWidth : rowWidth + badgeGapX + badgeWidth;
+          badgeX += badgeWidth + badgeGapX;
+        }
+      }
+
+      ctx.restore();
+      return textMetrics;
+    }
+
+    function roundRect(ctx, x, y, width, height, radius) {
+      const r = Math.min(radius, width / 2, height / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + width, y, x + width, y + height, r);
+      ctx.arcTo(x + width, y + height, x, y + height, r);
+      ctx.arcTo(x, y + height, x, y, r);
+      ctx.arcTo(x, y, x + width, y, r);
+      ctx.closePath();
+    }
+
+    function mixColor(base, overlay, alpha) {
+      const normalizedAlpha = Math.max(0, Math.min(1, alpha));
+      return overlay.replace(/rgb\(([^)]+)\)/, 'rgba($1, ' + normalizedAlpha + ')').replace(/#([0-9a-fA-F]{6})/, (match) => {
+        const bigint = parseInt(match.slice(1), 16);
+        const r = (bigint >> 16) & 255;
+        const g = (bigint >> 8) & 255;
+        const b = bigint & 255;
+        return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + normalizedAlpha + ')';
+      }) || base;
+    }
+
+    function withAlpha(color, alpha) {
+      const normalizedAlpha = Math.max(0, Math.min(1, alpha));
+      const rgbMatch = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(color);
+      if (rgbMatch) {
+        return `rgba(${rgbMatch[1]}, ${rgbMatch[2]}, ${rgbMatch[3]}, ${normalizedAlpha})`;
+      }
+      const rgbaMatch = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([^)]+)\)$/.exec(color);
+      if (rgbaMatch) {
+        return `rgba(${rgbaMatch[1]}, ${rgbaMatch[2]}, ${rgbaMatch[3]}, ${normalizedAlpha})`;
+      }
+      const hexMatch = /^#([0-9a-fA-F]{6})$/.exec(color);
+      if (hexMatch) {
+        const bigint = parseInt(hexMatch[1], 16);
+        const r = (bigint >> 16) & 255;
+        const g = (bigint >> 8) & 255;
+        const b = bigint & 255;
+        return `rgba(${r}, ${g}, ${b}, ${normalizedAlpha})`;
+      }
+      return color;
+    }
+
+    async function exportAsPng(requestId, expandMode) {
+      try {
+        await waitForFonts();
+        if (!state.tree) {
+          throw new Error('No map is loaded.');
+        }
+        const sourceTree = expandMode === 'expanded' ? cloneTreeExpanded(state.tree) : state.tree;
+        const colors = getExportColors();
+        const exportCanvas = document.createElement('canvas');
+        const exportCtx = exportCanvas.getContext('2d');
+        if (!exportCtx) {
+          throw new Error('Canvas export is not supported in this environment.');
+        }
+        const fontFamily = getComputedStyle(document.body).fontFamily;
+        exportCtx.font = '12px ' + fontFamily;
+        const layoutByPath = layoutTree(
+          sourceTree,
+          expandMode === 'expanded'
+            ? (path, node) => getExportNodeHeight(exportCtx, path, node)
+            : getNodeHeight,
+        );
+        const flatNodes = [];
+        collectVisible(sourceTree, null, 0, flatNodes);
+
+        let maxX = 0;
+        let maxY = 0;
+        for (const entry of flatNodes) {
+          const layout = layoutByPath.get(entry.path);
+          maxX = Math.max(maxX, layout.x);
+          maxY = Math.max(maxY, layout.y + layout.height);
+        }
+
+        const exportPadding = 24;
+        const width = Math.ceil(maxX + layoutConfig.nodeWidth + exportPadding * 2);
+        const height = Math.ceil(maxY + exportPadding * 2);
+        const scale = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.ceil(width * scale);
+        canvas.height = Math.ceil(height * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.scale(scale, scale);
+
+        ctx.fillStyle = colors.bg;
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.strokeStyle = mixColor(colors.fg, colors.border, 0.8);
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (const entry of flatNodes) {
+          const layout = layoutByPath.get(entry.path);
+          if (!layout.parentPath) {
+            continue;
+          }
+          const parentLayout = layoutByPath.get(layout.parentPath);
+          const startX = parentLayout.x + layoutConfig.nodeWidth + exportPadding;
+          const startY = parentLayout.y + parentLayout.height / 2 + exportPadding;
+          const endX = layout.x + exportPadding;
+          const endY = layout.y + layout.height / 2 + exportPadding;
+          const midX = startX + (endX - startX) / 2;
+          ctx.beginPath();
+          ctx.moveTo(startX, startY);
+          ctx.bezierCurveTo(midX, startY, midX, endY, endX, endY);
+          ctx.stroke();
+        }
+
+        for (const entry of flatNodes) {
+          const layout = layoutByPath.get(entry.path);
+          renderExportNode(ctx, entry.node, layout, colors, exportPadding, exportPadding);
+        }
+
+        const dataUrl = canvas.toDataURL('image/png');
+        post({ type: 'exportPngResult', requestId, dataUrl });
+      } catch (error) {
+        post({
+          type: 'exportPngError',
+          requestId,
+          message: error instanceof Error ? error.message : 'Failed to export PNG.',
+        });
+      }
+    }
+
     app.addEventListener('mousedown', (event) => {
       if (event.target.closest('.context-menu')) {
         return;
@@ -908,6 +1287,8 @@
         }
         render();
         ensureSelectedVisible();
+      } else if (message.type === 'requestExportPng') {
+        void exportAsPng(message.requestId, message.expandMode);
       } else if (message.type === 'operationError') {
         showError(message.message);
       }

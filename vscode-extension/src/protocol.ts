@@ -18,10 +18,19 @@ export interface ErrorMessage {
   message: string;
 }
 
+export type ExportPngMode = 'expanded' | 'current';
+
+export interface ExportPngRequestMessage {
+  type: 'requestExportPng';
+  requestId: string;
+  expandMode: ExportPngMode;
+}
+
 export type WebviewMessage =
   | { type: 'ready' }
   | { type: 'undo' }
   | { type: 'redo' }
+  | { type: 'exportPng' }
   | { type: 'copyNodeText'; path: string }
   | { type: 'pasteNodeText'; path: string }
   | { type: 'setName'; path: string; name: string }
@@ -32,7 +41,9 @@ export type WebviewMessage =
   | { type: 'toggleCollapse'; path: string }
   | { type: 'deleteNode'; path: string }
   | { type: 'toggleFlag'; path: string; flag: Flag }
-  | { type: 'moveNode'; path: string; direction: 'up' | 'down' };
+  | { type: 'moveNode'; path: string; direction: 'up' | 'down' }
+  | { type: 'exportPngResult'; requestId: string; dataUrl: string }
+  | { type: 'exportPngError'; requestId: string; message: string };
 
 export type OperationResult =
   | { selectedPath?: string; selectedPaths?: string[]; editPath?: string }
