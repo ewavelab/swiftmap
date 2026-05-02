@@ -1,0 +1,923 @@
+    const vscode = acquireVsCodeApi();
+    const app = document.getElementById('app');
+    const canvas = document.getElementById('canvas');
+    const nodesLayer = document.getElementById('nodes');
+    const edgesLayer = document.getElementById('edges');
+    const statusEl = document.getElementById('status');
+    const zoomLabel = document.getElementById('zoomLabel');
+    const hintEl = document.getElementById('hint');
+    const hintBodyEl = document.getElementById('hintBody');
+    const hintToggleEl = document.getElementById('hintToggle');
+    const contextMenuEl = document.getElementById('contextMenu');
+
+    const state = {
+      tree: null,
+      selectedPath: '0',
+      selectedPaths: new Set(['0']),
+      editingPath: null,
+      editValue: '',
+      panX: 80,
+      panY: 80,
+      zoom: 1,
+      pendingSelection: null,
+      pendingSelectedPaths: null,
+      pendingEdit: null,
+      pendingCreatedNodePath: null,
+      hintCollapsed: true,
+      layoutByPath: new Map(),
+      measuredHeights: new Map(),
+      flatNodes: [],
+      drag: null,
+      nodeDrag: null,
+      draggedNodePath: null,
+      draggedNodePaths: null,
+      dropTargetPath: null,
+      contextMenuPath: null,
+    };
+
+    let focusFrame = 0;
+    let rerenderFrame = 0;
+
+    const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+    const altLabel = isMac ? 'Option' : 'Alt';
+
+    const layoutConfig = {
+      nodeWidth: 184,
+      nodeHeight: 34,
+      horizontalGap: 88,
+      verticalGap: 14,
+      padding: 120,
+    };
+
+    function post(message) {
+      vscode.postMessage(message);
+    }
+
+    function escapeHtml(value) {
+      return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function showError(message) {
+      statusEl.style.display = message ? 'block' : 'none';
+      statusEl.textContent = message || '';
+    }
+
+    function renderHint() {
+      hintBodyEl.textContent =
+        'Enter/F2 edit, Shift+Enter add child, ' +
+        altLabel + '+Enter add sibling below, Shift+' + altLabel + '+Enter add sibling above, ' +
+        'Space collapse, Delete remove, ' +
+        'Ctrl+' + altLabel + '+1 done, ' +
+        'Ctrl+' + altLabel + '+2 rejected, ' +
+        'Ctrl+' + altLabel + '+3 question, ' +
+        'Ctrl+' + altLabel + '+4 task, ' +
+        'Ctrl+' + altLabel + '+5 idea, ' +
+        'Ctrl+' + altLabel + '+6 low priority, ' +
+        'Ctrl+' + altLabel + '+7 medium priority, ' +
+        'Ctrl+' + altLabel + '+8 high priority, Ctrl+Up/Down reorder.';
+      hintEl.classList.toggle('collapsed', state.hintCollapsed);
+      hintToggleEl.textContent = state.hintCollapsed ? 'Show' : 'Hide';
+    }
+
+    function setTransform() {
+      canvas.style.transform = 'translate(' + state.panX + 'px, ' + state.panY + 'px) scale(' + state.zoom + ')';
+      zoomLabel.textContent = Math.round(state.zoom * 100) + '%';
+    }
+
+    function collectVisible(node, parentPath, depth, list) {
+      list.push({ node, path: node.path, depth, parentPath });
+      if (!node.collapsed) {
+        for (const child of node.children) {
+          collectVisible(child, node.path, depth + 1, list);
+        }
+      }
+    }
+
+    function layoutTree(root) {
+      const layoutByPath = new Map();
+      let cursorY = 0;
+
+      function shiftSubtree(path, deltaY) {
+        for (const [key, layout] of layoutByPath.entries()) {
+          if (key === path || key.startsWith(path + '.')) {
+            layoutByPath.set(key, { ...layout, y: layout.y + deltaY });
+          }
+        }
+      }
+
+      function visit(node, depth, parentPath) {
+        const x = depth * (layoutConfig.nodeWidth + layoutConfig.horizontalGap);
+        const height = getNodeHeight(node.path, node);
+        if (!node.children.length || node.collapsed) {
+          const y = cursorY;
+          cursorY += height + layoutConfig.verticalGap;
+          layoutByPath.set(node.path, { x, y, height, parentPath, depth });
+          return { top: y, bottom: y + height, center: y + height / 2 };
+        }
+
+        const startY = cursorY;
+        let childTop = Number.POSITIVE_INFINITY;
+        let childBottom = Number.NEGATIVE_INFINITY;
+        const childCenters = [];
+        for (const child of node.children) {
+          const childLayout = visit(child, depth + 1, node.path);
+          childTop = Math.min(childTop, childLayout.top);
+          childBottom = Math.max(childBottom, childLayout.bottom);
+          childCenters.push(childLayout.center);
+        }
+        let centerY = (childCenters[0] + childCenters[childCenters.length - 1]) / 2;
+        let y = centerY - height / 2;
+
+        if (y < startY) {
+          const deltaY = startY - y;
+          shiftSubtree(node.path, deltaY);
+          childTop += deltaY;
+          childBottom += deltaY;
+          centerY += deltaY;
+          y += deltaY;
+        }
+
+        layoutByPath.set(node.path, { x, y, height, parentPath, depth });
+        const top = Math.min(y, childTop);
+        const bottom = Math.max(y + height, childBottom);
+        cursorY = bottom + layoutConfig.verticalGap;
+        return { top, bottom, center: centerY };
+      }
+
+      visit(root, 0, null);
+      return layoutByPath;
+    }
+
+    function setSingleSelection(path) {
+      state.selectedPath = path;
+      state.selectedPaths = new Set([path]);
+    }
+
+    function toggleSelection(path) {
+      const next = new Set(state.selectedPaths);
+      if (next.has(path) && next.size > 1) {
+        next.delete(path);
+      } else {
+        next.add(path);
+        state.selectedPath = path;
+      }
+      state.selectedPaths = next;
+    }
+
+    function normalizeSelection() {
+      const paths = new Set(state.flatNodes.map((entry) => entry.path));
+      if (state.pendingSelection && paths.has(state.pendingSelection)) {
+        state.selectedPath = state.pendingSelection;
+        state.pendingSelection = null;
+      } else if (!paths.has(state.selectedPath)) {
+        state.selectedPath = '0';
+      }
+
+      if (state.pendingSelectedPaths) {
+        const selectedPaths = state.pendingSelectedPaths.filter((path) => paths.has(path));
+        state.selectedPaths = new Set(selectedPaths.length > 0 ? selectedPaths : [state.selectedPath]);
+        state.pendingSelectedPaths = null;
+      } else {
+        const selectedPaths = Array.from(state.selectedPaths).filter((path) => paths.has(path));
+        state.selectedPaths = new Set(selectedPaths.length > 0 ? selectedPaths : [state.selectedPath]);
+      }
+      if (!state.selectedPaths.has(state.selectedPath)) {
+        state.selectedPaths.add(state.selectedPath);
+      }
+
+      if (state.pendingEdit && paths.has(state.pendingEdit)) {
+        state.editingPath = state.pendingEdit;
+        const node = state.flatNodes.find((entry) => entry.path === state.pendingEdit);
+        state.editValue = node ? node.node.name : '';
+        state.pendingEdit = null;
+      } else if (state.editingPath && !paths.has(state.editingPath)) {
+        state.editingPath = null;
+        state.editValue = '';
+      }
+
+      if (state.pendingCreatedNodePath && !paths.has(state.pendingCreatedNodePath)) {
+        state.pendingCreatedNodePath = null;
+      }
+    }
+
+    function render() {
+      nodesLayer.innerHTML = '';
+      edgesLayer.innerHTML = '';
+      if (!state.tree) {
+        return;
+      }
+
+      let layoutDirty = false;
+
+      state.layoutByPath = layoutTree(state.tree);
+      state.flatNodes = [];
+      collectVisible(state.tree, null, 0, state.flatNodes);
+      normalizeSelection();
+
+      let maxX = 0;
+      let maxY = 0;
+      for (const entry of state.flatNodes) {
+        const layout = state.layoutByPath.get(entry.path);
+        maxX = Math.max(maxX, layout.x);
+        maxY = Math.max(maxY, layout.y + layout.height);
+      }
+
+      edgesLayer.setAttribute('width', String(maxX + layoutConfig.nodeWidth + layoutConfig.padding));
+      edgesLayer.setAttribute('height', String(maxY + layoutConfig.padding));
+      canvas.style.width = maxX + layoutConfig.nodeWidth + layoutConfig.padding + 'px';
+      canvas.style.height = maxY + layoutConfig.padding + 'px';
+
+      for (const entry of state.flatNodes) {
+        const layout = state.layoutByPath.get(entry.path);
+        if (layout.parentPath) {
+          const parentLayout = state.layoutByPath.get(layout.parentPath);
+          const startX = parentLayout.x + layoutConfig.nodeWidth;
+          const startY = parentLayout.y + parentLayout.height / 2;
+          const endX = layout.x;
+          const endY = layout.y + layout.height / 2;
+          const midX = startX + (endX - startX) / 2;
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('class', 'edge');
+          path.setAttribute('d', 'M ' + startX + ' ' + startY + ' C ' + midX + ' ' + startY + ', ' + midX + ' ' + endY + ', ' + endX + ' ' + endY);
+          edgesLayer.appendChild(path);
+        }
+
+        const nodeEl = document.createElement('div');
+        const selected = state.selectedPaths.has(entry.path);
+        const editing = entry.path === state.editingPath;
+        nodeEl.className = 'node' + (selected ? ' selected' : '') + (editing ? ' editing' : '') + (entry.path === '0' ? ' node-root' : '');
+        if (state.draggedNodePaths && state.draggedNodePaths.includes(entry.path)) {
+          nodeEl.className += ' dragging-node';
+        }
+        if (entry.path === state.dropTargetPath) {
+          nodeEl.className += ' drop-target';
+        }
+        nodeEl.style.left = layout.x + 'px';
+        nodeEl.style.top = layout.y + 'px';
+        nodeEl.dataset.path = entry.path;
+
+        const hasChildren = entry.node.children.length > 0;
+        const collapseIndicator = hasChildren ? (entry.node.collapsed ? '+' : '−') : '';
+        const doneBadge = entry.node.flags.includes(1) ? '<span class="badge flag-done">✓ Done</span>' : '';
+        const rejectedBadge = entry.node.flags.includes(2) ? '<span class="badge flag-rejected">✕ Rejected</span>' : '';
+        const questionBadge = entry.node.flags.includes(3) ? '<span class="badge flag-question">? Question</span>' : '';
+        const taskBadge = entry.node.flags.includes(4) ? '<span class="badge flag-task">☰ Task</span>' : '';
+        const ideaBadge = entry.node.flags.includes(5) ? '<span class="badge flag-idea">💡 Idea</span>' : '';
+        const lowPriorityBadge = entry.node.flags.includes(6) ? '<span class="badge flag-priority-low">Low priority</span>' : '';
+        const mediumPriorityBadge = entry.node.flags.includes(7) ? '<span class="badge flag-priority-medium">Medium priority</span>' : '';
+        const highPriorityBadge = entry.node.flags.includes(8) ? '<span class="badge flag-priority-high">High priority</span>' : '';
+        const flagsMarkup = doneBadge + rejectedBadge + questionBadge + taskBadge + ideaBadge + lowPriorityBadge + mediumPriorityBadge + highPriorityBadge;
+        const metaMarkup = flagsMarkup ? '<div class="meta has-flags">' + flagsMarkup + '</div>' : '';
+
+        nodeEl.innerHTML =
+          '<div class="node-header">' +
+            '<span class="collapse">' + collapseIndicator + '</span>' +
+            (editing
+              ? '<textarea class="editor" spellcheck="false" rows="1">' + escapeHtml(state.editValue) + '</textarea>'
+              : '<div class="name">' + escapeHtml(entry.node.name || ' ') + '</div>') +
+          '</div>' +
+          metaMarkup;
+
+        nodeEl.addEventListener('mousedown', (event) => {
+          event.stopPropagation();
+          if (editing || entry.path === '0' || event.button !== 0) {
+            return;
+          }
+          if (!state.selectedPaths.has(entry.path) && !event.ctrlKey && !event.metaKey) {
+            setSingleSelection(entry.path);
+          }
+          state.nodeDrag = {
+            path: entry.path,
+            startX: event.clientX,
+            startY: event.clientY,
+            selectedPaths: Array.from(state.selectedPaths),
+          };
+        });
+        nodeEl.addEventListener('click', (event) => {
+          event.stopPropagation();
+          if (state.draggedNodePath) {
+            return;
+          }
+          closeContextMenu();
+          if (event.ctrlKey || event.metaKey) {
+            toggleSelection(entry.path);
+          } else {
+            setSingleSelection(entry.path);
+          }
+          render();
+        });
+        nodeEl.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!state.selectedPaths.has(entry.path)) {
+            setSingleSelection(entry.path);
+          } else {
+            state.selectedPath = entry.path;
+          }
+          state.editingPath = null;
+          render();
+          openContextMenu(entry.path, event.clientX, event.clientY);
+        });
+        nodesLayer.appendChild(nodeEl);
+
+        if (!editing) {
+          layoutDirty = updateMeasuredHeight(entry.path, nodeEl, layout.height) || layoutDirty;
+        }
+
+        if (editing) {
+          const input = nodeEl.querySelector('textarea');
+          scheduleEditorFocus(input);
+          autoSizeEditor(input);
+          if (updateMeasuredHeight(entry.path, nodeEl, layout.height)) {
+            scheduleRerender();
+          }
+          input.addEventListener('input', () => {
+            autoSizeEditor(input);
+            if (updateMeasuredHeight(entry.path, nodeEl, layout.height)) {
+              scheduleRerender();
+            }
+            state.editValue = input.value;
+          });
+          input.addEventListener('keydown', (event) => {
+            event.stopPropagation();
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commitEdit();
+            } else if (event.key === 'Escape') {
+              event.preventDefault();
+              cancelEdit();
+            }
+          });
+        }
+      }
+
+      setTransform();
+      if (layoutDirty) {
+        scheduleRerender();
+      }
+    }
+
+    function scheduleEditorFocus(input) {
+      if (focusFrame) {
+        cancelAnimationFrame(focusFrame);
+      }
+      focusFrame = requestAnimationFrame(() => {
+        input.focus();
+        autoSizeEditor(input);
+        input.setSelectionRange(input.value.length, input.value.length);
+        focusFrame = 0;
+      });
+    }
+
+    function scheduleRerender() {
+      if (rerenderFrame) {
+        return;
+      }
+      rerenderFrame = requestAnimationFrame(() => {
+        rerenderFrame = 0;
+        render();
+      });
+    }
+
+    function autoSizeEditor(input) {
+      input.style.height = '0px';
+      input.style.height = input.scrollHeight + 'px';
+    }
+
+    function updateMeasuredHeight(path, nodeEl, fallbackHeight) {
+      if (state.editingPath === path) {
+        const liveHeight = Math.ceil(nodeEl.getBoundingClientRect().height);
+        nodeEl.style.minHeight = Math.max(fallbackHeight, liveHeight) + 'px';
+        if (state.measuredHeights.get(path) !== liveHeight) {
+          state.measuredHeights.set(path, liveHeight);
+          return true;
+        }
+        return false;
+      }
+      const naturalHeight = Math.ceil(nodeEl.getBoundingClientRect().height);
+      nodeEl.style.minHeight = Math.max(fallbackHeight, naturalHeight) + 'px';
+      if (state.measuredHeights.get(path) !== naturalHeight) {
+        state.measuredHeights.set(path, naturalHeight);
+        return true;
+      }
+      return false;
+    }
+
+    function closeContextMenu() {
+      state.contextMenuPath = null;
+      contextMenuEl.classList.remove('open');
+      contextMenuEl.innerHTML = '';
+    }
+
+    function appendContextMenuSection(items) {
+      const section = document.createElement('div');
+      section.className = 'context-menu-section';
+      for (const item of items) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'context-menu-item';
+        button.disabled = Boolean(item.disabled);
+        button.setAttribute('role', 'menuitem');
+
+        if (item.icon) {
+          const icon = document.createElement('span');
+          icon.className = 'context-menu-icon';
+          icon.textContent = item.icon;
+          button.appendChild(icon);
+        }
+
+        const label = document.createElement('span');
+        label.className = 'context-menu-label' + (item.className ? ' ' + item.className : '');
+        label.textContent = item.label;
+        button.appendChild(label);
+
+        const check = document.createElement('span');
+        check.className = 'context-menu-check';
+        check.textContent = item.checked ? '✓' : '';
+        button.appendChild(check);
+
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          if (item.disabled) {
+            return;
+          }
+          closeContextMenu();
+          item.run();
+        });
+        section.appendChild(button);
+      }
+      contextMenuEl.appendChild(section);
+    }
+
+    function openContextMenu(path, clientX, clientY) {
+      const entry = state.flatNodes.find((candidate) => candidate.path === path);
+      if (!entry) {
+        return;
+      }
+
+      const isRoot = path === '0';
+      const hasChildren = entry.node.children.length > 0;
+      state.contextMenuPath = path;
+      contextMenuEl.innerHTML = '';
+
+      appendContextMenuSection([
+        { label: 'Edit', icon: '✎', run: () => startEdit(path) },
+        { label: 'Copy text', icon: '📋', run: () => post({ type: 'copyNodeText', path }) },
+        { label: 'Paste text', icon: '📋', run: () => post({ type: 'pasteNodeText', path }) },
+        { label: 'Undo', icon: '↶', run: () => post({ type: 'undo' }) },
+        { label: 'Redo', icon: '↷', run: () => post({ type: 'redo' }) },
+      ]);
+
+      appendContextMenuSection([
+        { label: 'Add child', icon: '➕', run: () => post({ type: 'addChild', path }) },
+        { label: 'Add sibling above', icon: '➕', disabled: isRoot, run: () => post({ type: 'addSibling', path, position: 'before' }) },
+        { label: 'Add sibling below', icon: '➕', disabled: isRoot, run: () => post({ type: 'addSibling', path, position: 'after' }) },
+      ]);
+
+      appendContextMenuSection([
+        { label: entry.node.collapsed ? 'Expand' : 'Collapse', icon: entry.node.collapsed ? '⌄' : '⌃', disabled: !hasChildren, run: () => post({ type: 'toggleCollapse', path }) },
+        { label: 'Move up', icon: '⬆', disabled: isRoot, run: () => post({ type: 'moveNode', path, direction: 'up' }) },
+        { label: 'Move down', icon: '⬇', disabled: isRoot, run: () => post({ type: 'moveNode', path, direction: 'down' }) },
+        { label: 'Delete', icon: '🗑', disabled: isRoot, run: () => post({ type: 'deleteNode', path }) },
+      ]);
+
+      appendContextMenuSection([
+        { label: '✓ Done', className: 'flag-done', checked: entry.node.flags.includes(1), run: () => post({ type: 'toggleFlag', path, flag: 1 }) },
+        { label: '✕ Rejected', className: 'flag-rejected', checked: entry.node.flags.includes(2), run: () => post({ type: 'toggleFlag', path, flag: 2 }) },
+        { label: '? Question', className: 'flag-question', checked: entry.node.flags.includes(3), run: () => post({ type: 'toggleFlag', path, flag: 3 }) },
+        { label: '☰ Task', className: 'flag-task', checked: entry.node.flags.includes(4), run: () => post({ type: 'toggleFlag', path, flag: 4 }) },
+        { label: '💡 Idea', className: 'flag-idea', checked: entry.node.flags.includes(5), run: () => post({ type: 'toggleFlag', path, flag: 5 }) },
+        { label: 'Low priority', className: 'flag-priority-low', checked: entry.node.flags.includes(6), run: () => post({ type: 'toggleFlag', path, flag: 6 }) },
+        { label: 'Medium priority', className: 'flag-priority-medium', checked: entry.node.flags.includes(7), run: () => post({ type: 'toggleFlag', path, flag: 7 }) },
+        { label: 'High priority', className: 'flag-priority-high', checked: entry.node.flags.includes(8), run: () => post({ type: 'toggleFlag', path, flag: 8 }) },
+      ]);
+
+      contextMenuEl.classList.add('open');
+      contextMenuEl.style.left = '0px';
+      contextMenuEl.style.top = '0px';
+      const menuRect = contextMenuEl.getBoundingClientRect();
+      const left = Math.min(clientX, window.innerWidth - menuRect.width - 8);
+      const top = Math.min(clientY, window.innerHeight - menuRect.height - 8);
+      contextMenuEl.style.left = Math.max(8, left) + 'px';
+      contextMenuEl.style.top = Math.max(8, top) + 'px';
+    }
+
+    function currentIndex() {
+      return state.flatNodes.findIndex((entry) => entry.path === state.selectedPath);
+    }
+
+    function selectedEntry() {
+      return state.flatNodes.find((entry) => entry.path === state.selectedPath) || null;
+    }
+
+    function ensureSelectedVisible() {
+      const layout = state.layoutByPath.get(state.selectedPath);
+      if (!layout) {
+        return;
+      }
+      const scaledX = layout.x * state.zoom + state.panX;
+      const scaledY = layout.y * state.zoom + state.panY;
+      const width = layoutConfig.nodeWidth * state.zoom;
+      const height = layout.height * state.zoom;
+      const margin = 40;
+      if (scaledX < margin) {
+        state.panX += margin - scaledX;
+      } else if (scaledX + width > window.innerWidth - margin) {
+        state.panX -= scaledX + width - (window.innerWidth - margin);
+      }
+      if (scaledY < margin) {
+        state.panY += margin - scaledY;
+      } else if (scaledY + height > window.innerHeight - margin) {
+        state.panY -= scaledY + height - (window.innerHeight - margin);
+      }
+      setTransform();
+    }
+
+    function moveSelectionVertical(direction) {
+      const entry = selectedEntry();
+      if (!entry) {
+        return;
+      }
+
+      const segments = entry.path.split('.');
+      if (segments.length === 1) {
+        if (entry.node.children.length > 0) {
+          const childIndex = direction > 0 ? 0 : entry.node.children.length - 1;
+          setSingleSelection(entry.node.children[childIndex].path);
+        }
+        state.editingPath = null;
+        ensureSelectedVisible();
+        render();
+        return;
+      }
+
+      const selfIndex = Number(segments[segments.length - 1]);
+      const parentPath = segments.slice(0, -1).join('.');
+      const parentEntry = state.flatNodes.find((candidate) => candidate.path === parentPath);
+      if (!parentEntry || parentEntry.node.children.length === 0) {
+        return;
+      }
+
+      const siblingCount = parentEntry.node.children.length;
+      const nextIndex = (selfIndex + direction + siblingCount) % siblingCount;
+      setSingleSelection(parentEntry.node.children[nextIndex].path);
+      state.editingPath = null;
+      ensureSelectedVisible();
+      render();
+    }
+
+    function navigateHorizontal(direction) {
+      const entry = selectedEntry();
+      if (!entry) {
+        return;
+      }
+      if (direction > 0) {
+        if (!entry.node.collapsed && entry.node.children.length > 0) {
+          setSingleSelection(entry.node.children[0].path);
+        }
+      } else {
+        const segments = entry.path.split('.');
+        if (segments.length > 1) {
+          segments.pop();
+          setSingleSelection(segments.join('.'));
+        }
+      }
+      ensureSelectedVisible();
+      render();
+    }
+
+    function startEdit(path) {
+      const entry = state.flatNodes.find((candidate) => candidate.path === path);
+      if (!entry) {
+        return;
+      }
+      setSingleSelection(path);
+      state.editingPath = path;
+      state.editValue = entry.node.name;
+      state.pendingCreatedNodePath = null;
+      state.measuredHeights.delete(path);
+      render();
+    }
+
+    function commitEdit() {
+      if (!state.editingPath) {
+        return;
+      }
+      const path = state.editingPath;
+      const value = state.editValue;
+      state.editingPath = null;
+      state.pendingCreatedNodePath = null;
+      state.pendingSelection = path;
+      state.measuredHeights.delete(path);
+      post({ type: 'setName', path, name: value });
+    }
+
+    function copySelectedNodeText() {
+      const entry = selectedEntry();
+      if (!entry) {
+        return;
+      }
+      post({ type: 'copyNodeText', path: entry.path });
+    }
+
+    function pasteIntoSelectedNodeText() {
+      const entry = selectedEntry();
+      if (!entry) {
+        return;
+      }
+      post({ type: 'pasteNodeText', path: entry.path });
+    }
+
+    function cancelEdit() {
+      const path = state.editingPath;
+      const shouldDeleteCreatedNode = path && state.pendingCreatedNodePath === path;
+      state.editingPath = null;
+      state.editValue = '';
+      state.pendingCreatedNodePath = null;
+      if (path) {
+        state.measuredHeights.delete(path);
+      }
+      render();
+      if (shouldDeleteCreatedNode) {
+        post({ type: 'deleteNode', path });
+      }
+    }
+
+    function zoomAt(nextZoom, clientX, clientY) {
+      const bounded = Math.min(2.2, Math.max(0.35, nextZoom));
+      const worldX = (clientX - state.panX) / state.zoom;
+      const worldY = (clientY - state.panY) / state.zoom;
+      state.zoom = bounded;
+      state.panX = clientX - worldX * state.zoom;
+      state.panY = clientY - worldY * state.zoom;
+      setTransform();
+    }
+
+    function canDropNodes(sourcePaths, targetPath) {
+      if (!sourcePaths || sourcePaths.length === 0 || !targetPath) {
+        return false;
+      }
+      for (const sourcePath of sourcePaths) {
+        if (sourcePath === '0' || sourcePath === targetPath || targetPath.startsWith(sourcePath + '.')) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    function findDropTargetPath(clientX, clientY) {
+      const element = document.elementFromPoint(clientX, clientY);
+      const node = element ? element.closest('.node') : null;
+      const targetPath = node ? node.dataset.path || null : null;
+      return canDropNodes(state.draggedNodePaths, targetPath) ? targetPath : null;
+    }
+
+    function getNodeHeight(path, node) {
+      const measuredHeight = state.measuredHeights.get(path);
+      if (measuredHeight) {
+        return measuredHeight;
+      }
+      const charsPerLine = 22;
+      const lines = Math.max(1, Math.ceil((node.name || ' ').length / charsPerLine));
+      const nameHeight = lines * 16;
+      const flagCount = node.flags.length;
+      const flagRows = flagCount > 0 ? Math.ceil(flagCount / 2) : 0;
+      const flagsHeight = flagRows > 0 ? flagRows * 15 + 4 : 0;
+      return Math.max(layoutConfig.nodeHeight, 16 + nameHeight + flagsHeight);
+    }
+
+    app.addEventListener('mousedown', (event) => {
+      if (event.target.closest('.context-menu')) {
+        return;
+      }
+      closeContextMenu();
+      if (event.target.closest('.node')) {
+        return;
+      }
+      state.drag = {
+        x: event.clientX,
+        y: event.clientY,
+        panX: state.panX,
+        panY: state.panY,
+      };
+      app.classList.add('dragging');
+    });
+
+    window.addEventListener('mousemove', (event) => {
+      if (state.nodeDrag) {
+        const moved = Math.abs(event.clientX - state.nodeDrag.startX) + Math.abs(event.clientY - state.nodeDrag.startY);
+        if (!state.draggedNodePath && moved > 6) {
+          state.draggedNodePath = state.nodeDrag.path;
+          state.draggedNodePaths = state.nodeDrag.selectedPaths && state.nodeDrag.selectedPaths.length > 0 ? state.nodeDrag.selectedPaths : [state.nodeDrag.path];
+          state.selectedPath = state.nodeDrag.path;
+          state.selectedPaths = new Set(state.draggedNodePaths);
+          render();
+        }
+      }
+
+      if (state.draggedNodePath) {
+        const nextDropTargetPath = findDropTargetPath(event.clientX, event.clientY);
+        if (state.dropTargetPath !== nextDropTargetPath) {
+          state.dropTargetPath = nextDropTargetPath;
+          render();
+        }
+        return;
+      }
+
+      if (!state.drag) {
+        return;
+      }
+      state.panX = state.drag.panX + (event.clientX - state.drag.x);
+      state.panY = state.drag.panY + (event.clientY - state.drag.y);
+      setTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (state.draggedNodePath) {
+        const draggedPath = state.draggedNodePath;
+        const draggedPaths = state.draggedNodePaths || [draggedPath];
+        const targetPath = state.dropTargetPath;
+        state.nodeDrag = null;
+        state.draggedNodePath = null;
+        state.draggedNodePaths = null;
+        state.dropTargetPath = null;
+        render();
+        if (canDropNodes(draggedPaths, targetPath)) {
+          if (draggedPaths.length === 1) {
+            post({ type: 'reparentNode', path: draggedPath, targetPath });
+          } else {
+            post({ type: 'reparentNodes', paths: draggedPaths, targetPath });
+          }
+        }
+        return;
+      }
+
+      state.nodeDrag = null;
+      state.drag = null;
+      app.classList.remove('dragging');
+    });
+
+    app.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      const delta = event.deltaY < 0 ? 1.08 : 0.92;
+      zoomAt(state.zoom * delta, event.clientX, event.clientY);
+    }, { passive: false });
+
+    window.addEventListener('keydown', (event) => {
+      if (!state.tree) {
+        return;
+      }
+
+      if (event.key === 'Escape' && state.contextMenuPath) {
+        event.preventDefault();
+        closeContextMenu();
+        return;
+      }
+
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (state.editingPath) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          cancelEdit();
+        }
+        return;
+      }
+
+      if (event.ctrlKey || event.metaKey) {
+        if (!event.altKey && (event.key === 'c' || event.key === 'C')) {
+          event.preventDefault();
+          copySelectedNodeText();
+          return;
+        }
+        if (!event.altKey && (event.key === 'v' || event.key === 'V')) {
+          event.preventDefault();
+          pasteIntoSelectedNodeText();
+          return;
+        }
+        if (event.key === 'z' || event.key === 'Z') {
+          event.preventDefault();
+          post({ type: 'undo' });
+          return;
+        }
+        if (event.key === 'y' || event.key === 'Y') {
+          event.preventDefault();
+          post({ type: 'redo' });
+          return;
+        }
+        if (event.altKey && /^[1-8]$/.test(event.key)) {
+          event.preventDefault();
+          post({
+            type: 'toggleFlag',
+            path: state.selectedPath,
+            flag: Number(event.key),
+          });
+          return;
+        }
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          post({ type: 'moveNode', path: state.selectedPath, direction: event.key === 'ArrowUp' ? 'up' : 'down' });
+          return;
+        }
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        moveSelectionVertical(-1);
+        return;
+      }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        moveSelectionVertical(1);
+        return;
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        navigateHorizontal(-1);
+        return;
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        navigateHorizontal(1);
+        return;
+      }
+      if (event.key === 'Enter' && event.shiftKey && event.altKey) {
+        event.preventDefault();
+        post({ type: 'addSibling', path: state.selectedPath, position: 'before' });
+        return;
+      }
+      if (event.key === 'Enter' && event.altKey) {
+        event.preventDefault();
+        post({ type: 'addSibling', path: state.selectedPath, position: 'after' });
+        return;
+      }
+      if (event.key === 'Enter' && event.shiftKey) {
+        event.preventDefault();
+        state.pendingSelection = state.selectedPath;
+        post({ type: 'addChild', path: state.selectedPath });
+        return;
+      }
+      if (event.key === 'Enter' || event.key === 'F2') {
+        event.preventDefault();
+        startEdit(state.selectedPath);
+        return;
+      }
+      if (event.key === ' ') {
+        event.preventDefault();
+        post({ type: 'toggleCollapse', path: state.selectedPath });
+        return;
+      }
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        post({ type: 'deleteNode', path: state.selectedPath });
+      }
+    });
+
+    window.addEventListener('message', (event) => {
+      const message = event.data;
+      if (message.type === 'document') {
+        showError('');
+        state.tree = message.tree;
+        state.measuredHeights.clear();
+        render();
+        ensureSelectedVisible();
+      } else if (message.type === 'error') {
+        showError(message.message);
+      } else if (message.type === 'operationResult') {
+        if (message.selectedPath) {
+          state.pendingSelection = message.selectedPath;
+        }
+        if (message.selectedPaths) {
+          state.pendingSelectedPaths = message.selectedPaths;
+        } else if (message.selectedPath) {
+          state.pendingSelectedPaths = [message.selectedPath];
+        }
+        if (message.editPath) {
+          state.pendingEdit = message.editPath;
+          state.pendingSelection = message.editPath;
+          state.pendingSelectedPaths = [message.editPath];
+          state.pendingCreatedNodePath = message.editPath;
+        }
+        render();
+        ensureSelectedVisible();
+      } else if (message.type === 'operationError') {
+        showError(message.message);
+      }
+    });
+
+    hintToggleEl.addEventListener('click', () => {
+      state.hintCollapsed = !state.hintCollapsed;
+      renderHint();
+    });
+
+    renderHint();
+    post({ type: 'ready' });
+    setTransform();

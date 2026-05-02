@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="__CSP__" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SwiftMap</title>
+  <link rel="stylesheet" href="__STYLE_URI__" />
+</head>
+<body>
+  <div id="app">
+    <div id="status"></div>
+    <div id="viewport">
+      <div id="canvas">
+        <svg id="edges"></svg>
+        <div id="nodes"></div>
+      </div>
+    </div>
+    <div id="hud">
+      <span id="zoomLabel">100%</span>
+    </div>
+    <div class="hint" id="hint">
+      <div class="hint-header">
+        <span class="hint-title">Keyboard Hints</span>
+        <button class="hint-toggle" id="hintToggle" type="button">Hide</button>
+      </div>
+      <div class="hint-body" id="hintBody"></div>
+    </div>
+    <div class="context-menu" id="contextMenu" role="menu"></div>
+  </div>
+  <script src="__SCRIPT_URI__"></script>
+</body>
+</html>
