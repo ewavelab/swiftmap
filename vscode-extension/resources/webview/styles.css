@@ -80,6 +80,33 @@
       backdrop-filter: blur(10px);
     }
 
+    .zoom-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: none;
+      border-radius: 999px;
+      padding: 4px 10px;
+      background: transparent;
+      color: var(--fg);
+      font: inherit;
+      line-height: 1.2;
+      cursor: pointer;
+    }
+
+    .zoom-control:hover,
+    .zoom-control:focus-visible {
+      outline: none;
+      background: color-mix(in srgb, var(--bg) 72%, var(--accent) 10%);
+    }
+
+    .zoom-control-caret {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1;
+      transform: translateY(-1px);
+    }
+
     #viewport {
       position: absolute;
       inset: 0;
@@ -324,6 +351,10 @@
 
     .context-menu.open {
       display: block;
+    }
+
+    .zoom-menu {
+      min-width: 180px;
     }
 
     .context-menu-section {

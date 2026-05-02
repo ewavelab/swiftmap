@@ -11,6 +11,7 @@ export interface SerializedNode {
 export interface DocumentStateMessage {
   type: 'document';
   tree: SerializedNode;
+  zoom: number;
 }
 
 export interface ErrorMessage {
@@ -28,6 +29,7 @@ export interface ExportPngRequestMessage {
 
 export type WebviewMessage =
   | { type: 'ready' }
+  | { type: 'zoomChanged'; zoom: number }
   | { type: 'undo' }
   | { type: 'redo' }
   | { type: 'exportPng' }

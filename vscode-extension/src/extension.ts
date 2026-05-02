@@ -78,6 +78,7 @@ function getActiveSwiftMapUri(): vscode.Uri | undefined {
 class SwiftMapEditorProvider implements vscode.CustomTextEditorProvider {
   public static readonly viewType = 'swiftmap.editor';
   private static readonly panels = new Map<string, vscode.WebviewPanel>();
+  private static zoomLevel = 1;
   private static instance: SwiftMapEditorProvider | undefined;
 
   public static register(context: vscode.ExtensionContext): vscode.Disposable {
@@ -107,6 +108,7 @@ class SwiftMapEditorProvider implements vscode.CustomTextEditorProvider {
 
   private constructor(private readonly context: vscode.ExtensionContext) {
     SwiftMapEditorProvider.instance = this;
+    SwiftMapEditorProvider.zoomLevel = Math.min(2.2, Math.max(0.35, context.globalState.get<number>('swiftmap.zoom', 1)));
   }
 
   public async resolveCustomTextEditor(
@@ -123,7 +125,7 @@ class SwiftMapEditorProvider implements vscode.CustomTextEditorProvider {
       try {
         const parsed = parseDocument(document.getText());
         const tree = serializeForWebview(parsed.root, '0');
-        const message: DocumentStateMessage = { type: 'document', tree };
+        const message: DocumentStateMessage = { type: 'document', tree, zoom: SwiftMapEditorProvider.zoomLevel };
         void webviewPanel.webview.postMessage(message);
       } catch (error) {
         const message: ErrorMessage = {
@@ -145,6 +147,10 @@ class SwiftMapEditorProvider implements vscode.CustomTextEditorProvider {
         switch (message.type) {
           case 'ready':
             updateWebview();
+            return;
+          case 'zoomChanged':
+            SwiftMapEditorProvider.zoomLevel = Math.min(2.2, Math.max(0.35, message.zoom));
+            void this.context.globalState.update('swiftmap.zoom', SwiftMapEditorProvider.zoomLevel);
             return;
           case 'undo':
             await vscode.commands.executeCommand('undo');

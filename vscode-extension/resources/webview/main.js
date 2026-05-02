@@ -4,6 +4,7 @@
     const nodesLayer = document.getElementById('nodes');
     const edgesLayer = document.getElementById('edges');
     const statusEl = document.getElementById('status');
+    const zoomControlEl = document.getElementById('zoomControl');
     const zoomLabel = document.getElementById('zoomLabel');
     const hintEl = document.getElementById('hint');
     const hintBodyEl = document.getElementById('hintBody');
@@ -33,6 +34,7 @@
       draggedNodePaths: null,
       dropTargetPath: null,
       contextMenuPath: null,
+      zoomMenuOpen: false,
     };
 
     let focusFrame = 0;
@@ -40,6 +42,7 @@
 
     const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
     const altLabel = isMac ? 'Option' : 'Alt';
+    const zoomLevels = [0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 
     const layoutConfig = {
       nodeWidth: 184,
@@ -87,6 +90,7 @@
     function setTransform() {
       canvas.style.transform = 'translate(' + state.panX + 'px, ' + state.panY + 'px) scale(' + state.zoom + ')';
       zoomLabel.textContent = Math.round(state.zoom * 100) + '%';
+      zoomControlEl.setAttribute('aria-expanded', state.zoomMenuOpen ? 'true' : 'false');
     }
 
     function collectVisible(node, parentPath, depth, list) {
@@ -421,6 +425,8 @@
     function closeContextMenu() {
       state.contextMenuPath = null;
       contextMenuEl.classList.remove('open');
+      contextMenuEl.classList.remove('zoom-menu');
+      contextMenuEl.dataset.mode = '';
       contextMenuEl.innerHTML = '';
     }
 
@@ -465,6 +471,7 @@
     }
 
     function openContextMenu(path, clientX, clientY) {
+      closeZoomMenu();
       const entry = state.flatNodes.find((candidate) => candidate.path === path);
       if (!entry) {
         return;
@@ -516,6 +523,96 @@
       const top = Math.min(clientY, window.innerHeight - menuRect.height - 8);
       contextMenuEl.style.left = Math.max(8, left) + 'px';
       contextMenuEl.style.top = Math.max(8, top) + 'px';
+    }
+
+    function closeZoomMenu() {
+      state.zoomMenuOpen = false;
+      zoomControlEl.setAttribute('aria-expanded', 'false');
+      contextMenuEl.classList.remove('open');
+      contextMenuEl.classList.remove('zoom-menu');
+      if (contextMenuEl.dataset.mode === 'zoom') {
+        contextMenuEl.innerHTML = '';
+      }
+      contextMenuEl.dataset.mode = '';
+    }
+
+    function appendMenuSection(container, items) {
+      const section = document.createElement('div');
+      section.className = 'context-menu-section';
+      for (const item of items) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'context-menu-item';
+        button.disabled = Boolean(item.disabled);
+        button.setAttribute('role', 'menuitem');
+
+        if (item.icon) {
+          const icon = document.createElement('span');
+          icon.className = 'context-menu-icon';
+          icon.textContent = item.icon;
+          button.appendChild(icon);
+        }
+
+        const label = document.createElement('span');
+        label.className = 'context-menu-label' + (item.className ? ' ' + item.className : '');
+        label.textContent = item.label;
+        button.appendChild(label);
+
+        const check = document.createElement('span');
+        check.className = 'context-menu-check';
+        check.textContent = item.checked ? '✓' : '';
+        button.appendChild(check);
+
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          if (item.disabled) {
+            return;
+          }
+          if (item.closeOnClick !== false) {
+            closeZoomMenu();
+          }
+          item.run();
+        });
+        section.appendChild(button);
+      }
+      container.appendChild(section);
+    }
+
+    function openZoomMenu() {
+      state.zoomMenuOpen = true;
+      contextMenuEl.dataset.mode = 'zoom';
+      contextMenuEl.innerHTML = '';
+
+      appendMenuSection(contextMenuEl, [
+        { label: 'Zoom in', icon: '＋', run: () => zoomAt(state.zoom * 1.15, window.innerWidth / 2, window.innerHeight / 2) },
+        { label: 'Zoom out', icon: '－', run: () => zoomAt(state.zoom / 1.15, window.innerWidth / 2, window.innerHeight / 2) },
+      ]);
+
+      appendMenuSection(contextMenuEl, zoomLevels.map((zoomLevel) => ({
+        label: Math.round(zoomLevel * 100) + '%',
+        checked: Math.abs(state.zoom - zoomLevel) < 0.001,
+        run: () => zoomAt(zoomLevel, window.innerWidth / 2, window.innerHeight / 2),
+      })));
+
+      contextMenuEl.classList.add('open', 'zoom-menu');
+      contextMenuEl.style.left = '0px';
+      contextMenuEl.style.top = '0px';
+      const anchorRect = zoomControlEl.getBoundingClientRect();
+      const menuRect = contextMenuEl.getBoundingClientRect();
+      const left = Math.min(anchorRect.right - menuRect.width, window.innerWidth - menuRect.width - 8);
+      const top = Math.min(anchorRect.top - menuRect.height - 8, window.innerHeight - menuRect.height - 8);
+      contextMenuEl.style.left = Math.max(8, left) + 'px';
+      contextMenuEl.style.top = Math.max(8, top) + 'px';
+      zoomControlEl.setAttribute('aria-expanded', 'true');
+    }
+
+    function toggleZoomMenu() {
+      if (state.zoomMenuOpen) {
+        closeZoomMenu();
+      } else {
+        closeContextMenu();
+        openZoomMenu();
+      }
     }
 
     function currentIndex() {
@@ -667,6 +764,7 @@
       state.panX = clientX - worldX * state.zoom;
       state.panY = clientY - worldY * state.zoom;
       setTransform();
+      post({ type: 'zoomChanged', zoom: state.zoom });
     }
 
     function canDropNodes(sourcePaths, targetPath) {
@@ -1071,7 +1169,7 @@
     }
 
     app.addEventListener('mousedown', (event) => {
-      if (event.target.closest('.context-menu')) {
+      if (event.target.closest('.context-menu') || event.target.closest('#hud')) {
         return;
       }
       closeContextMenu();
@@ -1152,9 +1250,10 @@
         return;
       }
 
-      if (event.key === 'Escape' && state.contextMenuPath) {
+      if (event.key === 'Escape' && (state.contextMenuPath || state.zoomMenuOpen)) {
         event.preventDefault();
         closeContextMenu();
+        closeZoomMenu();
         return;
       }
 
@@ -1260,11 +1359,26 @@
       }
     });
 
+    zoomControlEl.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleZoomMenu();
+    });
+
+    window.addEventListener('mousedown', (event) => {
+      if (event.target.closest('#zoomControl') || event.target.closest('.zoom-menu')) {
+        return;
+      }
+      if (state.zoomMenuOpen) {
+        closeZoomMenu();
+      }
+    });
+
     window.addEventListener('message', (event) => {
       const message = event.data;
       if (message.type === 'document') {
         showError('');
         state.tree = message.tree;
+        state.zoom = Math.min(2.2, Math.max(0.35, message.zoom || state.zoom));
         state.measuredHeights.clear();
         render();
         ensureSelectedVisible();
