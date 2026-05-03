@@ -67,7 +67,7 @@
         "command": "swiftmap.exportPng",
         "title": "SwiftMap: Export PNG",
         "shortTitle": "Export PNG",
-        "icon": "$(export)"
+        "icon": "$(link-external)"
       }
     ],
     "menus": {

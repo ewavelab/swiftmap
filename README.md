@@ -2,9 +2,9 @@
 
 SwiftMap is a Visual Studio Code extension for editing tree-structured mind maps in a visual graph editor backed by a plain text `.swiftmap` file format.
 
-![Example - Personal Roadmap](examples/personal-roadmap-screenshot.png)
+![Example - Personal Roadmap](examples/personal-roadmap.png)
 
-![Example - Project Plan](examples/project-planning-screenshot.png)
+![Example - Project Plan](examples/project-planning.png)
 
 The product specification lives in [docs/Design.md](docs/Design.md), and the `.swiftmap` file format is specified in [docs/SwiftMapFormat.md](docs/SwiftMapFormat.md). The repository also includes examples in `examples/` folder.
 
