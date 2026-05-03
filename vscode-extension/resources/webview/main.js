@@ -39,17 +39,18 @@
 
     let focusFrame = 0;
     let rerenderFrame = 0;
+    let pendingEditorSelection = null;
 
     const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
     const altLabel = isMac ? 'Option' : 'Alt';
     const zoomLevels = [0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 
     const layoutConfig = {
-      nodeWidth: 184,
-      nodeHeight: 34,
-      horizontalGap: 88,
-      verticalGap: 14,
-      padding: 120,
+      nodeWidth: 196,
+      nodeHeight: 32,
+      horizontalGap: 96,
+      verticalGap: 12,
+      padding: 140,
     };
 
     function post(message) {
@@ -72,7 +73,7 @@
 
     function renderHint() {
       hintBodyEl.textContent =
-        'Enter/F2 edit, Shift+Enter add child, ' +
+        'Enter/F2 edit, double-click edit, Shift+Enter add child, ' +
         altLabel + '+Enter add sibling below, Shift+' + altLabel + '+Enter add sibling above, ' +
         'Space collapse, Delete remove, ' +
         'Ctrl+' + altLabel + '+1 done, ' +
@@ -183,6 +184,19 @@
       state.selectedPaths = next;
     }
 
+    function extendSelectionToPath(path) {
+      if (!path || path === state.selectedPath) {
+        return;
+      }
+      const next = new Set(state.selectedPaths);
+      next.add(path);
+      state.selectedPath = path;
+      state.selectedPaths = next;
+      state.editingPath = null;
+      ensureSelectedVisible();
+      render();
+    }
+
     function normalizeSelection() {
       const paths = new Set(state.flatNodes.map((entry) => entry.path));
       if (state.pendingSelection && paths.has(state.pendingSelection)) {
@@ -220,6 +234,18 @@
     }
 
     function render() {
+      if (state.editingPath) {
+        const editor = nodesLayer.querySelector('textarea.editor');
+        if (editor && !pendingEditorSelection) {
+          pendingEditorSelection = {
+            start: editor.selectionStart ?? editor.value.length,
+            end: editor.selectionEnd ?? editor.value.length,
+            direction: editor.selectionDirection || 'none',
+          };
+        }
+      } else {
+        pendingEditorSelection = null;
+      }
       nodesLayer.innerHTML = '';
       edgesLayer.innerHTML = '';
       if (!state.tree) {
@@ -314,6 +340,9 @@
         });
         nodeEl.addEventListener('click', (event) => {
           event.stopPropagation();
+          if (editing) {
+            return;
+          }
           if (state.draggedNodePath) {
             return;
           }
@@ -324,6 +353,15 @@
             setSingleSelection(entry.path);
           }
           render();
+        });
+        nodeEl.addEventListener('dblclick', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (editing || entry.path === '0') {
+            return;
+          }
+          closeContextMenu();
+          startEdit(entry.path);
         });
         nodeEl.addEventListener('contextmenu', (event) => {
           event.preventDefault();
@@ -345,13 +383,36 @@
 
         if (editing) {
           const input = nodeEl.querySelector('textarea');
-          scheduleEditorFocus(input);
+          scheduleEditorFocus(input, pendingEditorSelection);
           autoSizeEditor(input);
           if (updateMeasuredHeight(entry.path, nodeEl, layout.height)) {
             scheduleRerender();
           }
-          input.addEventListener('input', () => {
+          const setEditorValue = (nextValue) => {
+            input.value = nextValue;
+            state.editValue = nextValue;
             autoSizeEditor(input);
+            if (updateMeasuredHeight(entry.path, nodeEl, layout.height)) {
+              scheduleRerender();
+            }
+          };
+          const replaceSelection = (replacement) => {
+            const start = input.selectionStart ?? 0;
+            const end = input.selectionEnd ?? 0;
+            const nextValue = input.value.slice(0, start) + replacement + input.value.slice(end);
+            setEditorValue(nextValue);
+            const nextCursor = start + replacement.length;
+            input.setSelectionRange(nextCursor, nextCursor);
+            pendingEditorSelection = {
+              start: nextCursor,
+              end: nextCursor,
+              direction: 'none',
+            };
+          };
+          input.addEventListener('input', () => {
+            const selection = captureEditorSelection(input);
+            pendingEditorSelection = selection;
+            autoSizeEditor(input, selection);
             if (updateMeasuredHeight(entry.path, nodeEl, layout.height)) {
               scheduleRerender();
             }
@@ -359,6 +420,42 @@
           });
           input.addEventListener('keydown', (event) => {
             event.stopPropagation();
+            if (event.metaKey || event.ctrlKey) {
+              const key = event.key.toLowerCase();
+              if (key === 'a') {
+                event.preventDefault();
+                input.setSelectionRange(0, input.value.length);
+                return;
+              }
+              if (key === 'c') {
+                event.preventDefault();
+                const start = input.selectionStart ?? 0;
+                const end = input.selectionEnd ?? input.value.length;
+                void navigator.clipboard.writeText(input.value.slice(start, end));
+                return;
+              }
+              if (key === 'x') {
+                event.preventDefault();
+                const start = input.selectionStart ?? 0;
+                const end = input.selectionEnd ?? input.value.length;
+                void navigator.clipboard.writeText(input.value.slice(start, end));
+                setEditorValue(input.value.slice(0, start) + input.value.slice(end));
+                input.setSelectionRange(start, start);
+                pendingEditorSelection = {
+                  start,
+                  end: start,
+                  direction: 'none',
+                };
+                return;
+              }
+              if (key === 'v') {
+                event.preventDefault();
+                void navigator.clipboard.readText().then((text) => {
+                  replaceSelection(text);
+                });
+                return;
+              }
+            }
             if (event.key === 'Enter') {
               event.preventDefault();
               commitEdit();
@@ -376,14 +473,19 @@
       }
     }
 
-    function scheduleEditorFocus(input) {
+    function scheduleEditorFocus(input, selection) {
       if (focusFrame) {
         cancelAnimationFrame(focusFrame);
       }
       focusFrame = requestAnimationFrame(() => {
         input.focus();
         autoSizeEditor(input);
-        input.setSelectionRange(input.value.length, input.value.length);
+        if (selection) {
+          input.setSelectionRange(selection.start, selection.end, selection.direction || 'none');
+        } else {
+          input.setSelectionRange(input.value.length, input.value.length);
+        }
+        pendingEditorSelection = null;
         focusFrame = 0;
       });
     }
@@ -398,14 +500,40 @@
       });
     }
 
-    function autoSizeEditor(input) {
-      input.style.height = '0px';
+    function captureEditorSelection(input) {
+      return {
+        start: input.selectionStart ?? input.value.length,
+        end: input.selectionEnd ?? input.value.length,
+        direction: input.selectionDirection || 'none',
+      };
+    }
+
+    function autoSizeEditor(input, selection = null) {
+      const scrollTop = input.scrollTop;
+      input.style.height = 'auto';
       input.style.height = input.scrollHeight + 'px';
+
+      input.scrollTop = scrollTop;
+
+      if (selection) {
+        requestAnimationFrame(() => {
+          if (!document.contains(input)) {
+            return;
+          }
+          try {
+            input.setSelectionRange(selection.start, selection.end, selection.direction || 'none');
+          } catch {
+            // Some browsers can reject selection restoration during resize; keep typing stable when they do.
+          }
+          input.scrollTop = scrollTop;
+        });
+      }
     }
 
     function updateMeasuredHeight(path, nodeEl, fallbackHeight) {
+      const zoom = state.zoom || 1;
       if (state.editingPath === path) {
-        const liveHeight = Math.ceil(nodeEl.getBoundingClientRect().height);
+        const liveHeight = Math.ceil(nodeEl.getBoundingClientRect().height / zoom);
         nodeEl.style.minHeight = Math.max(fallbackHeight, liveHeight) + 'px';
         if (state.measuredHeights.get(path) !== liveHeight) {
           state.measuredHeights.set(path, liveHeight);
@@ -413,7 +541,7 @@
         }
         return false;
       }
-      const naturalHeight = Math.ceil(nodeEl.getBoundingClientRect().height);
+      const naturalHeight = Math.ceil(nodeEl.getBoundingClientRect().height / zoom);
       nodeEl.style.minHeight = Math.max(fallbackHeight, naturalHeight) + 'px';
       if (state.measuredHeights.get(path) !== naturalHeight) {
         state.measuredHeights.set(path, naturalHeight);
@@ -486,7 +614,6 @@
         { label: 'Edit', icon: '✎', run: () => startEdit(path) },
         { label: 'Copy text', icon: '📋', run: () => post({ type: 'copyNodeText', path }) },
         { label: 'Paste text', icon: '📋', run: () => post({ type: 'pasteNodeText', path }) },
-        { label: 'Export PNG...', icon: '🖼', run: () => post({ type: 'exportPng' }) },
         { label: 'Undo', icon: '↶', run: () => post({ type: 'undo' }) },
         { label: 'Redo', icon: '↷', run: () => post({ type: 'redo' }) },
       ]);
@@ -796,14 +923,13 @@
       const nameHeight = lines * 16;
       const flagCount = node.flags.length;
       const flagRows = flagCount > 0 ? Math.ceil(flagCount / 2) : 0;
-      const flagsHeight = flagRows > 0 ? flagRows * 15 + 4 : 0;
-      return Math.max(layoutConfig.nodeHeight, 16 + nameHeight + flagsHeight);
+      const flagsHeight = flagRows > 0 ? flagRows * 14 + 3 : 0;
+      return Math.max(layoutConfig.nodeHeight, 14 + nameHeight + flagsHeight);
     }
 
     function getExportNodeHeight(ctx, path, node) {
-      const hasChildren = node.children.length > 0;
-      const textXOffset = hasChildren ? 34 : 10;
-      const textMaxWidth = layoutConfig.nodeWidth - textXOffset - 10;
+      const textXOffset = 34;
+      const textMaxWidth = layoutConfig.nodeWidth - textXOffset - 12;
       const textLines = wrapText(ctx, node.name || ' ', textMaxWidth);
       const badges = getFlagBadgeDefinitions(node.flags);
       const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
@@ -811,8 +937,8 @@
       ctx.font = badgeFont;
       const badgeRows = countBadgeRows(ctx, badges, textMaxWidth);
       ctx.restore();
-      const flagsHeight = badgeRows > 0 ? badgeRows * 19 : 0;
-      return Math.max(layoutConfig.nodeHeight, 16 + textLines.length * 16 + flagsHeight);
+      const flagsHeight = badgeRows > 0 ? 3 + (badgeRows * 14) + ((badgeRows - 1) * 3) : 0;
+      return Math.max(layoutConfig.nodeHeight, 8 + Math.max(18, textLines.length * 18) + flagsHeight + 8);
     }
 
     function readCssVar(name) {
@@ -822,12 +948,20 @@
     function getExportColors() {
       return {
         bg: readCssVar('--bg') || '#ffffff',
+        bgSoft: readCssVar('--bg-soft') || '#f6f7f8',
         fg: readCssVar('--fg') || '#111111',
         muted: readCssVar('--muted') || '#666666',
-        surface: readCssVar('--surface') || '#f5f5f5',
-        surfaceActive: readCssVar('--surface-active') || '#e8eefc',
-        border: readCssVar('--border') || '#d0d0d0',
-        accent: readCssVar('--accent') || '#2f6feb',
+        nodeFillStart: readCssVar('--node-fill-start') || '#e8ebee',
+        nodeFillEnd: readCssVar('--node-fill-end') || '#dde1e5',
+        nodeSelectedFillStart: readCssVar('--node-selected-fill-start') || '#dadfe2',
+        nodeSelectedFillEnd: readCssVar('--node-selected-fill-end') || '#cdd2d7',
+        nodeBorder: readCssVar('--node-border') || '#bec2c6',
+        nodeSelectedBorder: readCssVar('--node-selected-border') || '#1f848f',
+        nodeRootFillStart: readCssVar('--node-root-fill-start') || 'rgba(55, 189, 203, 0.18)',
+        nodeRootFillEnd: readCssVar('--node-root-fill-end') || 'rgba(255, 255, 255, 0.88)',
+        nodeRootSelectedFillStart: readCssVar('--node-root-selected-fill-start') || 'rgba(30, 156, 170, 0.22)',
+        nodeRootSelectedFillEnd: readCssVar('--node-root-selected-fill-end') || 'rgba(233, 248, 250, 0.94)',
+        nodeRootSelectedBorder: readCssVar('--node-root-selected-border') || '#1f848f',
         done: readCssVar('--done') || '#2ea043',
         rejected: readCssVar('--rejected') || '#cf222e',
         question: readCssVar('--question') || '#1f6feb',
@@ -836,9 +970,7 @@
         priorityLow: readCssVar('--priority-low') || '#8b949e',
         priorityMedium: readCssVar('--priority-medium') || '#d29922',
         priorityHigh: readCssVar('--priority-high') || '#fb8500',
-        shadow: 'rgba(0, 0, 0, 0.18)',
-        collapseBg: readCssVar('--collapse-bg') || '',
-        collapseBorder: readCssVar('--collapse-border') || '',
+        shadow: 'rgba(13, 33, 44, 0.06)',
       };
     }
 
@@ -935,8 +1067,11 @@
     }
 
     function measureExportNode(ctx, node, hasChildren) {
-      const textXOffset = hasChildren ? 34 : 10;
-      const textMaxWidth = layoutConfig.nodeWidth - textXOffset - 10;
+      const nodePaddingX = 12;
+      const collapseSize = 20;
+      const gap = 6;
+      const textXOffset = nodePaddingX + collapseSize + gap;
+      const textMaxWidth = layoutConfig.nodeWidth - textXOffset - nodePaddingX;
       const textLines = wrapText(ctx, node.name || ' ', textMaxWidth);
       const badges = getFlagBadgeDefinitions(node.flags);
       const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
@@ -944,10 +1079,11 @@
       ctx.font = badgeFont;
       const badgeRows = countBadgeRows(ctx, badges, textMaxWidth);
       ctx.restore();
+      const headerHeight = Math.max(collapseSize, textLines.length * 19);
       return {
         textLines,
         badgeRows,
-        height: Math.max(layoutConfig.nodeHeight, 16 + textLines.length * 16 + (badgeRows > 0 ? badgeRows * 19 : 0)),
+        height: Math.max(layoutConfig.nodeHeight, 10 + headerHeight + (badgeRows > 0 ? 4 + (badgeRows * 16) + ((badgeRows - 1) * 4) : 0) + 10),
       };
     }
 
@@ -959,13 +1095,36 @@
       const rootNode = node.path === '0';
       const collapsed = node.collapsed;
       const hasChildren = node.children.length > 0;
+      const selected = node.path === state.selectedPath;
+      const nodePaddingX = 10;
+      const nodePaddingY = 8;
+      const collapseSize = 18;
+      const collapseRadius = 5;
+      const headerGap = 4;
 
       ctx.save();
-      ctx.shadowColor = colors.shadow;
-      ctx.shadowBlur = 12;
-      ctx.shadowOffsetY = 4;
-      ctx.fillStyle = rootNode ? colors.surfaceActive : colors.surface;
-      ctx.strokeStyle = rootNode ? colors.accent : colors.border;
+      ctx.shadowColor = rootNode ? 'rgba(13, 33, 44, 0.04)' : colors.shadow;
+      ctx.shadowBlur = rootNode ? 6 : 8;
+      ctx.shadowOffsetY = rootNode ? 1 : 2;
+      const fillGradient = ctx.createLinearGradient(x, y, x, y + height);
+      if (rootNode && selected) {
+        fillGradient.addColorStop(0, 'rgba(205, 233, 236, 1)');
+        fillGradient.addColorStop(1, 'rgba(234, 248, 250, 1)');
+        ctx.strokeStyle = 'rgba(55, 189, 203, 0.96)';
+      } else if (rootNode) {
+        fillGradient.addColorStop(0, 'rgba(205, 233, 236, 1)');
+        fillGradient.addColorStop(1, 'rgba(246, 251, 252, 1)');
+        ctx.strokeStyle = colors.nodeBorder;
+      } else if (selected) {
+        fillGradient.addColorStop(0, colors.nodeSelectedFillStart);
+        fillGradient.addColorStop(1, colors.nodeSelectedFillEnd);
+        ctx.strokeStyle = colors.nodeSelectedBorder;
+      } else {
+        fillGradient.addColorStop(0, colors.nodeFillStart);
+        fillGradient.addColorStop(1, colors.nodeFillEnd);
+        ctx.strokeStyle = colors.nodeBorder;
+      }
+      ctx.fillStyle = fillGradient;
       ctx.lineWidth = 1;
       roundRect(ctx, x, y, width, height, 12);
       ctx.fill();
@@ -973,31 +1132,32 @@
       ctx.stroke();
 
       ctx.fillStyle = colors.fg;
-      ctx.font = '600 12px ' + getComputedStyle(document.body).fontFamily;
+      ctx.font = '13px ' + getComputedStyle(document.body).fontFamily;
       ctx.textBaseline = 'top';
 
-      let textX = x + 10;
+      let textX = x + nodePaddingX + collapseSize + headerGap;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.strokeStyle = 'rgba(13, 29, 39, 0.12)';
+      ctx.lineWidth = 1;
+      roundRect(ctx, x + nodePaddingX, y + nodePaddingY, collapseSize, collapseSize, collapseRadius);
+      ctx.fill();
+      ctx.stroke();
       if (hasChildren) {
-        ctx.fillStyle = withAlpha(colors.bg, 0.86);
-        ctx.strokeStyle = withAlpha(colors.fg, 0.18);
-        ctx.lineWidth = 1;
-        roundRect(ctx, x + 10, y + 8, 18, 18, 5);
-        ctx.fill();
-        ctx.stroke();
         ctx.fillStyle = colors.muted;
         ctx.font = '700 13px ' + getComputedStyle(document.body).fontFamily;
         ctx.textAlign = 'center';
-        ctx.fillText(collapsed ? '+' : '−', x + 19, y + 10);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(collapsed ? '+' : '−', x + nodePaddingX + collapseSize / 2, y + nodePaddingY + collapseSize / 2 + 0.5);
         ctx.textAlign = 'left';
-        textX += 24;
+        ctx.textBaseline = 'top';
       }
 
       const textMetrics = measureExportNode(ctx, node, hasChildren);
       ctx.fillStyle = colors.fg;
-      ctx.font = '12px ' + getComputedStyle(document.body).fontFamily;
-      const lineHeight = 16;
-      const textTop = y + 10;
-      const textWidth = width - (textX - x) - 10;
+      ctx.font = '13px ' + getComputedStyle(document.body).fontFamily;
+      const lineHeight = 18;
+      const textTop = y + nodePaddingY + 3;
+      const textWidth = width - (textX - x) - 12;
       const textLines = wrapText(ctx, node.name || ' ', textWidth);
       for (let index = 0; index < textLines.length; index += 1) {
         ctx.fillText(textLines[index], textX, textTop + index * lineHeight);
@@ -1005,18 +1165,18 @@
 
       const badges = getFlagBadgeDefinitions(node.flags);
       if (badges.length > 0) {
-        const badgeTop = textTop + textLines.length * lineHeight + 6;
+        const badgeTop = textTop + textLines.length * lineHeight + 3;
         const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
         ctx.font = badgeFont;
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'left';
         let badgeX = textX;
         let badgeY = badgeTop;
-        const badgeGapX = 6;
-        const badgeGapY = 5;
-        const maxBadgeWidth = width - (textX - x) - 10;
+        const badgeGapX = 5;
+        const badgeGapY = 3;
+        const maxBadgeWidth = width - (textX - x) - 12;
         let rowWidth = 0;
-        let rowHeight = 14;
+        const rowHeight = 14;
         for (let index = 0; index < badges.length; index += 1) {
           const badge = badges[index];
           const badgeWidth = ctx.measureText(badge.label).width + 14;
@@ -1026,14 +1186,14 @@
             rowWidth = 0;
           }
 
-          ctx.fillStyle = withAlpha(colors.bg, 0.80);
-          ctx.strokeStyle = withAlpha(colors.fg, 0.12);
+          ctx.fillStyle = withAlpha(colors.bg, 1);
+          ctx.strokeStyle = withAlpha(colors.fg, 0.08);
           ctx.lineWidth = 1;
-          roundRect(ctx, badgeX, badgeY, badgeWidth, 14, 999);
+          roundRect(ctx, badgeX, badgeY, badgeWidth, rowHeight, 999);
           ctx.fill();
           ctx.stroke();
           ctx.fillStyle = badge.color;
-          ctx.fillText(badge.label, badgeX + 7, badgeY + 7);
+          ctx.fillText(badge.label, badgeX + 6, badgeY + 7);
           rowWidth = rowWidth === 0 ? badgeWidth : rowWidth + badgeGapX + badgeWidth;
           badgeX += badgeWidth + badgeGapX;
         }
@@ -1086,6 +1246,77 @@
       return color;
     }
 
+    async function exportAsCanvasPng(sourceTree, expandMode) {
+      const colors = getExportColors();
+      const exportCanvas = document.createElement('canvas');
+      const exportCtx = exportCanvas.getContext('2d');
+      if (!exportCtx) {
+        throw new Error('Canvas export is not supported in this environment.');
+      }
+      const fontFamily = getComputedStyle(document.body).fontFamily;
+      exportCtx.font = '12px ' + fontFamily;
+      const layoutByPath = layoutTree(
+        sourceTree,
+        expandMode === 'expanded'
+          ? (path, node) => getExportNodeHeight(exportCtx, path, node)
+          : getNodeHeight,
+      );
+      const flatNodes = [];
+      collectVisible(sourceTree, null, 0, flatNodes);
+
+      let maxX = 0;
+      let maxY = 0;
+      for (const entry of flatNodes) {
+        const layout = layoutByPath.get(entry.path);
+        maxX = Math.max(maxX, layout.x);
+        maxY = Math.max(maxY, layout.y + layout.height);
+      }
+
+      const exportPadding = 24;
+      const width = Math.ceil(maxX + layoutConfig.nodeWidth + exportPadding * 2);
+      const height = Math.ceil(maxY + exportPadding * 2);
+      const scale = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.ceil(width * scale);
+      canvas.height = Math.ceil(height * scale);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('Canvas export is not supported in this environment.');
+      }
+      ctx.scale(scale, scale);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.strokeStyle = 'rgba(121, 131, 142, 0.50)';
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const entry of flatNodes) {
+        const layout = layoutByPath.get(entry.path);
+        if (!layout.parentPath) {
+          continue;
+        }
+        const parentLayout = layoutByPath.get(layout.parentPath);
+        const startX = parentLayout.x + layoutConfig.nodeWidth + exportPadding;
+        const startY = parentLayout.y + parentLayout.height / 2 + exportPadding;
+        const endX = layout.x + exportPadding;
+        const endY = layout.y + layout.height / 2 + exportPadding;
+        const midX = startX + (endX - startX) / 2;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.bezierCurveTo(midX, startY, midX, endY, endX, endY);
+        ctx.stroke();
+      }
+
+      for (const entry of flatNodes) {
+        const layout = layoutByPath.get(entry.path);
+        renderExportNode(ctx, entry.node, layout, colors, exportPadding, exportPadding);
+      }
+
+      return canvas.toDataURL('image/png');
+    }
+
     async function exportAsPng(requestId, expandMode) {
       try {
         await waitForFonts();
@@ -1093,71 +1324,7 @@
           throw new Error('No map is loaded.');
         }
         const sourceTree = expandMode === 'expanded' ? cloneTreeExpanded(state.tree) : state.tree;
-        const colors = getExportColors();
-        const exportCanvas = document.createElement('canvas');
-        const exportCtx = exportCanvas.getContext('2d');
-        if (!exportCtx) {
-          throw new Error('Canvas export is not supported in this environment.');
-        }
-        const fontFamily = getComputedStyle(document.body).fontFamily;
-        exportCtx.font = '12px ' + fontFamily;
-        const layoutByPath = layoutTree(
-          sourceTree,
-          expandMode === 'expanded'
-            ? (path, node) => getExportNodeHeight(exportCtx, path, node)
-            : getNodeHeight,
-        );
-        const flatNodes = [];
-        collectVisible(sourceTree, null, 0, flatNodes);
-
-        let maxX = 0;
-        let maxY = 0;
-        for (const entry of flatNodes) {
-          const layout = layoutByPath.get(entry.path);
-          maxX = Math.max(maxX, layout.x);
-          maxY = Math.max(maxY, layout.y + layout.height);
-        }
-
-        const exportPadding = 24;
-        const width = Math.ceil(maxX + layoutConfig.nodeWidth + exportPadding * 2);
-        const height = Math.ceil(maxY + exportPadding * 2);
-        const scale = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.ceil(width * scale);
-        canvas.height = Math.ceil(height * scale);
-        const ctx = canvas.getContext('2d');
-        ctx.scale(scale, scale);
-
-        ctx.fillStyle = colors.bg;
-        ctx.fillRect(0, 0, width, height);
-
-        ctx.strokeStyle = mixColor(colors.fg, colors.border, 0.8);
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        for (const entry of flatNodes) {
-          const layout = layoutByPath.get(entry.path);
-          if (!layout.parentPath) {
-            continue;
-          }
-          const parentLayout = layoutByPath.get(layout.parentPath);
-          const startX = parentLayout.x + layoutConfig.nodeWidth + exportPadding;
-          const startY = parentLayout.y + parentLayout.height / 2 + exportPadding;
-          const endX = layout.x + exportPadding;
-          const endY = layout.y + layout.height / 2 + exportPadding;
-          const midX = startX + (endX - startX) / 2;
-          ctx.beginPath();
-          ctx.moveTo(startX, startY);
-          ctx.bezierCurveTo(midX, startY, midX, endY, endX, endY);
-          ctx.stroke();
-        }
-
-        for (const entry of flatNodes) {
-          const layout = layoutByPath.get(entry.path);
-          renderExportNode(ctx, entry.node, layout, colors, exportPadding, exportPadding);
-        }
-
-        const dataUrl = canvas.toDataURL('image/png');
+        const dataUrl = await exportAsCanvasPng(sourceTree, expandMode);
         post({ type: 'exportPngResult', requestId, dataUrl });
       } catch (error) {
         post({
@@ -1183,6 +1350,14 @@
         panY: state.panY,
       };
       app.classList.add('dragging');
+    });
+
+    app.addEventListener('contextmenu', (event) => {
+      if (event.target.closest('.node')) {
+        return;
+      }
+      event.preventDefault();
+      closeContextMenu();
     });
 
     window.addEventListener('mousemove', (event) => {
@@ -1268,6 +1443,43 @@
           cancelEdit();
         }
         return;
+      }
+
+      if (event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          const entry = selectedEntry();
+          if (!entry) {
+            return;
+          }
+          const index = currentIndex();
+          if (index < 0) {
+            return;
+          }
+          const nextIndex = index + (event.key === 'ArrowUp' ? -1 : 1);
+          if (nextIndex < 0 || nextIndex >= state.flatNodes.length) {
+            return;
+          }
+          extendSelectionToPath(state.flatNodes[nextIndex].path);
+          return;
+        }
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+          event.preventDefault();
+          const entry = selectedEntry();
+          if (!entry) {
+            return;
+          }
+          if (event.key === 'ArrowLeft') {
+            const segments = entry.path.split('.');
+            if (segments.length > 1) {
+              segments.pop();
+              extendSelectionToPath(segments.join('.'));
+            }
+          } else if (!entry.node.collapsed && entry.node.children.length > 0) {
+            extendSelectionToPath(entry.node.children[0].path);
+          }
+          return;
+        }
       }
 
       if (event.ctrlKey || event.metaKey) {

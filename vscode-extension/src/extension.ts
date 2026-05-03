@@ -208,7 +208,7 @@ class SwiftMapEditorProvider implements vscode.CustomTextEditorProvider {
       "default-src 'none'",
       `style-src ${_webview.cspSource}`,
       `script-src ${_webview.cspSource}`,
-      'img-src data:',
+      `img-src ${_webview.cspSource} data:`,
     ].join('; ');
 
     const templatePath = path.join(this.context.extensionPath, 'resources', 'webview', 'index.html');
