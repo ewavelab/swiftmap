@@ -1,0 +1,8 @@
+src/**
+node_modules/**
+examples/**
+docs/**
+.vscode/**
+*.tsbuildinfo
+package-lock.json
+tsconfig.json

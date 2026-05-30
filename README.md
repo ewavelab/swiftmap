@@ -41,12 +41,25 @@ A launch configuration is already provided in `.vscode/launch.json`.
 To create a `.vsix` package:
 
 ```bash
-cd vscode-extension
-npx @vscode/vsce package
+npm --prefix vscode-extension run package
 ```
 
 Then install it in VS Code with:
 
 ```bash
-code --install-extension swiftmap-0.0.1.vsix
+code --install-extension ./swiftmap.vsix
+```
+
+The Marketplace listing content is sourced from [`vscode-extension/README.md`](vscode-extension/README.md), and release notes live in [`vscode-extension/CHANGELOG.md`](vscode-extension/CHANGELOG.md).
+
+To build the extension before packaging:
+
+```bash
+npm --prefix vscode-extension run build
+```
+
+To publish the extension with the configured VS Code Marketplace tooling:
+
+```bash
+npm --prefix vscode-extension run publish
 ```

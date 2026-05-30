@@ -2,20 +2,31 @@
   "name": "swiftmap",
   "displayName": "SwiftMap",
   "description": "Minimal mind map editor for Visual Studio Code.",
-  "version": "0.0.1",
+  "version": "0.9.1",
   "icon": "resources/icon.png",
-  "publisher": "local",
-  "license": "UNLICENSED",
+  "publisher": "ewavelab",
+  "license": "GPL-3.0-only",
+  "categories": [
+    "Visualization"
+  ],
+  "keywords": [
+    "mind map",
+    "outline",
+    "tree",
+    "diagram",
+    "notes"
+  ],
+  "homepage": "https://swiftmap.pages.dev/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rafalchojnacki/swiftmap.git"
+    "url": "git+https://github.com/ewavelab/swiftmap.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ewavelab/swiftmap/issues"
   },
   "engines": {
     "vscode": "^1.90.0"
   },
-  "categories": [
-    "Other"
-  ],
   "activationEvents": [
     "onLanguage:swiftmap",
     "onCustomEditor:swiftmap.editor"
@@ -92,7 +103,11 @@
   },
   "scripts": {
     "build": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run build",
+    "prepublishOnly": "npm run build",
+    "package": "npx @vscode/vsce package --out ../swiftmap.vsix",
+    "publish": "npx @vscode/vsce publish"
   },
   "devDependencies": {
     "@types/node": "^20.14.12",
