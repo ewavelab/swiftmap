@@ -559,9 +559,9 @@
       contextMenuEl.innerHTML = '';
     }
 
-    function appendContextMenuSection(items) {
+    function appendContextMenuSection(container, items, className = '') {
       const section = document.createElement('div');
-      section.className = 'context-menu-section';
+      section.className = 'context-menu-section' + (className ? ' ' + className : '');
       for (const item of items) {
         const button = document.createElement('button');
         button.type = 'button';
@@ -596,7 +596,7 @@
         });
         section.appendChild(button);
       }
-      contextMenuEl.appendChild(section);
+      container.appendChild(section);
     }
 
     function openContextMenu(path, clientX, clientY) {
@@ -611,35 +611,43 @@
       state.contextMenuPath = path;
       contextMenuEl.innerHTML = '';
 
-      appendContextMenuSection([
+      const columns = document.createElement('div');
+      columns.className = 'context-menu-columns';
+      const leftColumn = document.createElement('div');
+      leftColumn.className = 'context-menu-column';
+      const rightColumn = document.createElement('div');
+      rightColumn.className = 'context-menu-column';
+      columns.appendChild(leftColumn);
+      columns.appendChild(rightColumn);
+      contextMenuEl.appendChild(columns);
+
+      appendContextMenuSection(leftColumn, [
         { label: 'Edit', icon: '✎', run: () => startEdit(path) },
         { label: 'Copy text', icon: '📋', run: () => post({ type: 'copyNodeText', path }) },
         { label: 'Paste text', icon: '📋', run: () => post({ type: 'pasteNodeText', path }) },
-        { label: 'Undo', icon: '↶', run: () => post({ type: 'undo' }) },
-        { label: 'Redo', icon: '↷', run: () => post({ type: 'redo' }) },
       ]);
 
-      appendContextMenuSection([
+      appendContextMenuSection(leftColumn, [
         { label: 'Add child', icon: '➕', run: () => post({ type: 'addChild', path }) },
         { label: 'Add sibling above', icon: '➕', disabled: isRoot, run: () => post({ type: 'addSibling', path, position: 'before' }) },
         { label: 'Add sibling below', icon: '➕', disabled: isRoot, run: () => post({ type: 'addSibling', path, position: 'after' }) },
       ]);
 
-      appendContextMenuSection([
+      appendContextMenuSection(leftColumn, [
         { label: entry.node.collapsed ? 'Expand' : 'Collapse', icon: entry.node.collapsed ? '⌄' : '⌃', disabled: !hasChildren, run: () => post({ type: 'toggleCollapse', path }) },
         { label: 'Move up', icon: '⬆', disabled: isRoot, run: () => post({ type: 'moveNode', path, direction: 'up' }) },
         { label: 'Move down', icon: '⬇', disabled: isRoot, run: () => post({ type: 'moveNode', path, direction: 'down' }) },
         { label: 'Delete', icon: '🗑', disabled: isRoot, run: () => post({ type: 'deleteNode', path }) },
       ]);
 
-      appendContextMenuSection([
+      appendContextMenuSection(rightColumn, [
         { label: 'No priority', checked: entry.node.priority === 0, run: () => post({ type: 'setPriority', path, priority: 0 }) },
         { label: 'Low priority', className: 'priority-low', checked: entry.node.priority === 1, run: () => post({ type: 'setPriority', path, priority: 1 }) },
         { label: 'Medium priority', className: 'priority-medium', checked: entry.node.priority === 2, run: () => post({ type: 'setPriority', path, priority: 2 }) },
         { label: 'High priority', className: 'priority-high', checked: entry.node.priority === 3, run: () => post({ type: 'setPriority', path, priority: 3 }) },
       ]);
 
-      appendContextMenuSection([
+      appendContextMenuSection(rightColumn, [
         { label: '✓ Done', className: 'tag-done', checked: entry.node.tags.includes(1), run: () => post({ type: 'toggleTag', path, tag: 1 }) },
         { label: '✕ Rejected', className: 'tag-rejected', checked: entry.node.tags.includes(2), run: () => post({ type: 'toggleTag', path, tag: 2 }) },
         { label: '? Question', className: 'tag-question', checked: entry.node.tags.includes(3), run: () => post({ type: 'toggleTag', path, tag: 3 }) },

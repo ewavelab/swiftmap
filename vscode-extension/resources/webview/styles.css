@@ -396,12 +396,12 @@
     .context-menu {
       position: fixed;
       z-index: 40;
-      min-width: 220px;
-      max-width: min(280px, calc(100vw - 16px));
+      min-width: 440px;
+      max-width: min(520px, calc(100vw - 16px));
       max-height: min(680px, calc(100vh - 16px));
       overflow-y: auto;
       display: none;
-      padding: 6px;
+      padding: 4px;
       border-radius: 16px;
       border: 1px solid var(--border);
       background: rgba(255, 255, 255, 0.92);
@@ -419,8 +419,36 @@
       min-width: 180px;
     }
 
+    .context-menu-columns {
+      position: relative;
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .context-menu-columns::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 1px;
+      background: var(--border);
+      pointer-events: none;
+      transform: translateX(-0.5px);
+    }
+
+    .context-menu-column {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+
+    .context-menu-column + .context-menu-column {
+      padding-left: 8px;
+    }
+
     .context-menu-section {
-      padding: 6px 0;
+      padding: 4px 0;
       border-top: 1px solid var(--border);
     }
 
@@ -430,14 +458,14 @@
 
     .context-menu-item {
       width: 100%;
-      min-height: 30px;
+      min-height: 28px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
+      gap: 8px;
       border: none;
       border-radius: 10px;
-      padding: 5px 10px;
+      padding: 4px 10px;
       background: transparent;
       color: inherit;
       font: inherit;
@@ -459,14 +487,14 @@
     .context-menu-icon {
       color: var(--muted);
       flex-shrink: 0;
-      width: 16px;
+      width: 14px;
       text-align: center;
       opacity: 0.7;
     }
 
     .context-menu-check {
       color: var(--accent);
-      min-width: 12px;
+      min-width: 10px;
       text-align: right;
     }
 
