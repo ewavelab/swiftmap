@@ -268,13 +268,16 @@
 
     .meta {
       display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-top: 3px;
+    }
+
+    .meta-row {
+      display: flex;
       align-items: center;
       gap: 4px;
       flex-wrap: wrap;
-    }
-
-    .meta.has-flags {
-      margin-top: 3px;
     }
 
     .badge {
@@ -291,35 +294,35 @@
       white-space: nowrap;
     }
 
-    .flag-done {
+    .tag-done {
       color: var(--done);
     }
 
-    .flag-idea {
+    .tag-idea {
       color: var(--idea);
     }
 
-    .flag-rejected {
+    .tag-rejected {
       color: var(--rejected);
     }
 
-    .flag-question {
+    .tag-question {
       color: var(--question);
     }
 
-    .flag-task {
+    .tag-task {
       color: var(--task);
     }
 
-    .flag-priority-low {
+    .priority-low {
       color: var(--priority-low);
     }
 
-    .flag-priority-medium {
+    .priority-medium {
       color: var(--priority-medium);
     }
 
-    .flag-priority-high {
+    .priority-high {
       color: var(--priority-high);
     }
 

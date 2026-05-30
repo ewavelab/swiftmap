@@ -16,7 +16,9 @@ SwiftMap writes files in canonical form:
 - Each node is written on one line.
 - Each child level is indented by two spaces.
 - Empty lines are omitted.
-- Flags are emitted in this order: `Done`, `Rejected`, `Question`, `Task`, `Idea`, `Low priority`, `Medium priority`, `High priority`.
+- Priority is emitted before tags.
+- Tags are emitted in this order: `Done`, `Rejected`, `Question`, `Task`, `Idea`.
+- Priority is emitted separately as `[]`, `Low priority`, `Medium priority`, or `High priority`.
 - Node names are trimmed and cannot contain line breaks.
 - The file does not require a trailing newline.
 
@@ -25,22 +27,23 @@ SwiftMap writes files in canonical form:
 Each node line has this structure:
 
 ```text
-INDENT STATUS SPACE FLAGS [SPACE NAME]
+INDENT STATUS SPACE PRIORITY SPACE TAGS [SPACE NAME]
 ```
 
 Where:
 
 - `INDENT` is zero or more indentation characters. In canonical form this is two spaces per depth level.
 - `STATUS` is `+` for expanded or `-` for collapsed.
-- `FLAGS` is a square-bracketed comma-separated list of zero or more flags.
-- `NAME` is optional single-line text after the flags token.
+- `PRIORITY` is a square-bracketed single priority value or `[]`.
+- `TAGS` is a square-bracketed comma-separated list of zero or more tags.
+- `NAME` is optional single-line text after the priority token.
 
 Examples:
 
 ```text
-+ [] Root
-  + [Done] Finished task
-  - [Rejected,Question,Task] Needs review
++ [] [] Root
+  + [] [Done] Finished task
+  - [High priority] [Rejected,Question,Task] Needs review
 ```
 
 ## Canonical Grammar
@@ -49,12 +52,14 @@ This grammar describes the canonical serialized form.
 
 ```ebnf
 document    = node-line { line-break node-line } [ line-break ] ;
-node-line   = indent status space flags [ space name ] ;
+node-line   = indent status space priority space tags [ space name ] ;
 indent      = { "  " } ;
 status      = "+" | "-" ;
-flags       = "[" [ flag-list ] "]" ;
-flag-list   = flag { "," flag } ;
-flag        = "Done" | "Rejected" | "Question" | "Task" | "Idea" | "Low priority" | "Medium priority" | "High priority" ;
+priority    = "[" [ priority-value ] "]" ;
+priority-value = "Low priority" | "Medium priority" | "High priority" ;
+tags        = "[" [ tag-list ] "]" ;
+tag-list    = tag { "," tag } ;
+tag         = "Done" | "Rejected" | "Question" | "Task" | "Idea" ;
 name        = { name-character } ;
 line-break  = "\n" | "\r\n" ;
 space       = " " ;
@@ -73,27 +78,38 @@ The tree is constructed by processing non-empty lines from top to bottom:
 
 Canonical depth is computed as the number of leading spaces divided by two. A canonical file must not use odd numbers of leading spaces.
 
-## Flags
+## Tags and Priority
 
-The supported flags are:
+The supported tags are:
 
-| Flag | Meaning |
+| Tag | Meaning |
 | --- | --- |
 | `Done` | Completed item |
 | `Rejected` | Rejected or discarded item |
 | `Question` | Item requiring a decision |
 | `Task` | Actionable task |
 | `Idea` | Idea or proposal |
+
+The supported priority values are:
+
+| Priority | Meaning |
+| --- | --- |
 | `Low priority` | Low-priority item |
 | `Medium priority` | Medium-priority item |
 | `High priority` | High-priority item |
 
-Flag lists must follow these rules:
+Priority values must follow these rules:
 
-- Use `[]` for no flags.
+- Use `[]` for no priority.
+- Write at most one priority value.
+- Write the priority in this order: `Low priority`, `Medium priority`, `High priority`.
+
+Tag lists must follow these rules:
+
+- Use `[]` for no tags.
 - Do not include spaces around commas inside the brackets.
-- Do not repeat a flag.
-- Write flags in this exact order: `Done`, `Rejected`, `Question`, `Task`, `Idea`, `Low priority`, `Medium priority`, `High priority`.
+- Do not repeat a tag.
+- Write tags in this exact order: `Done`, `Rejected`, `Question`, `Task`, `Idea`.
 
 Valid examples:
 
@@ -101,17 +117,23 @@ Valid examples:
 []
 [Done]
 [Done,Task]
-[Done,Rejected,Question,Task,Idea,Low priority,Medium priority,High priority]
+[Done,Rejected,Question,Task,Idea]
+
+[]
+[Low priority]
+[Medium priority]
+[High priority]
 ```
 
 Invalid examples:
 
 ```text
 [Idea,Done]
-[High priority,Task]
+[Task,High priority]
 [Done, Done]
 [Done,Done]
 [Unknown]
+[Done,Task,Low priority]
 ```
 
 ## Names
@@ -123,7 +145,7 @@ Node names are plain text:
 - Leading and trailing whitespace is ignored.
 - Empty names are valid.
 
-Because every node line starts with `STATUS FLAGS`, a name may contain characters that look like flags, punctuation, or additional spaces after the first name character.
+Because every node line starts with `STATUS PRIORITY TAGS`, a name may contain characters that look like tags, priority values, punctuation, or additional spaces after the first name character.
 
 ## Reader Compatibility
 
@@ -133,20 +155,22 @@ The current SwiftMap extension reader accepts a small superset of the canonical 
 - Blank lines are ignored.
 - Tabs in indentation are treated as two spaces.
 - Child indentation is based on relative indentation width, so non-canonical indentation may still parse if each child line is more indented than its parent line.
-- Empty node names may be written either as `+ []` or with a trailing separator space as `+ [] `.
+- The reader accepts both `STATUS PRIORITY TAGS` and the older `STATUS TAGS PRIORITY` token order.
+- Legacy single-token aspect lines such as `+ [Done,High priority] Name` are still accepted and migrated to the canonical two-token form on write.
+- Empty node names may be written either as `+ [] []` or with a trailing separator space as `+ [] [] `.
 
 Writers should still emit canonical form.
 
 ## Complete Example
 
 ```text
-+ [] Project Planning
-  + [Done] Scope
-    + [Done] Identify goals
-    + [Done,Task,Idea] Define success metrics
-  + [Idea] Discovery
-    + [] Interview users
-  - [Rejected] Deprecated Ideas
-    + [Rejected] Build custom sync engine
-  + [Task,High priority] Delivery
++ [] [] Project Planning
+  + [] [Done] Scope
+    + [] [Done] Identify goals
+    + [] [Done,Task,Idea] Define success metrics
+  + [] [Idea] Discovery
+    + [] [] Interview users
+  - [] [Rejected] Deprecated Ideas
+    + [] [Rejected] Build custom sync engine
+  + [High priority] [Task] Delivery
 ```

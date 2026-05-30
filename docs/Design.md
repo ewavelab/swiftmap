@@ -19,9 +19,14 @@ General features:
     - name
         - single-line text
         - no formatting
-    - zero or more flags
-        - possible flags: done (green check mark icon), rejected (red cross icon), question (blue question mark icon), task (purple square icon), idea (lamp icon), low priority, medium priority, or high priority
-        - flag can be edited using ctrl+alt+N keyboard shortcut, where N is a number
+    - zero or more tags
+        - possible tags: done (green check mark icon), rejected (red cross icon), question (blue question mark icon), task (purple square icon), idea (lamp icon)
+        - tag can be edited using ctrl+alt+N keyboard shortcut, where N is a number
+    - one priority value at a time
+        - possible priorities: low priority, medium priority, or high priority
+        - priority can be edited using ctrl+alt+N keyboard shortcut, where N is a number
+    - priority should be shown as a separate row in node view
+    - shortcut numbering should map priorities to ctrl+alt+1..3 and tags to ctrl+alt+4..8
     - can be in 'view' state or 'edit' state
         - at a time zero or one node can be in edit state
         - when in 'view' state, 'enter' or 'F2' key enters 'edit' state, when in 'edit' state 'enter' key confirms the update and 'esc' key rollbacks the changes
@@ -60,7 +65,7 @@ General features:
     - Selected nodes cannot contain one another when moved together
  - Graph layout should be automatic - user cannot edit layout. Layout should be hierarchical and horizontal.
  - Arrow keys allow to navigate between nodes. It is also possible to use mouse to select a node.
- - Right-clicking a node should open a context menu with available actions, including edit, copy text, paste text, undo, redo, add child, add sibling above, add sibling below, expand/collapse, reorder, delete, and all flag toggles.
+ - Right-clicking a node should open a context menu with available actions, including edit, copy text, paste text, undo, redo, add child, add sibling above, add sibling below, expand/collapse, reorder, delete, all tag toggles, and priority actions. The tag group and priority group should be separated by a visible divider.
  - It should be possible to open the source of the current mind map file in a text editor from the visual editor
     - The visual editor should provide an icon action for this
  - It should be possible to open the visual editor for the current `.swiftmap` file from the text editor
@@ -73,6 +78,7 @@ General features:
 ## File Format
 
 The graph should be stored as a text file. The formal `.swiftmap` file format specification lives in [SwiftMapFormat.md](SwiftMapFormat.md).
+Canonical serialization writes priority before tags.
 
 # Implementation Requirements
 

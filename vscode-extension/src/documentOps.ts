@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
-import type { Flag, OperationResult, SerializedNode, WebviewMessage } from './protocol';
+import type { OperationResult, Priority, SerializedNode, Tag, WebviewMessage } from './protocol';
 
 export interface MindMapNode {
   name: string;
   collapsed: boolean;
-  flags: Flag[];
+  tags: Tag[];
+  priority: Priority;
   children: MindMapNode[];
 }
 
@@ -13,7 +14,7 @@ export interface ParsedDocument {
 }
 
 export function parseDocument(text: string): ParsedDocument {
-  const lines = text.length === 0 ? ['+ [] Root'] : text.replace(/\r/g, '').split('\n');
+  const lines = text.length === 0 ? ['+ [] [] Root'] : text.replace(/\r/g, '').split('\n');
   const stack: Array<{ indent: number; node: MindMapNode }> = [];
   let root: MindMapNode | undefined;
 
@@ -25,18 +26,21 @@ export function parseDocument(text: string): ParsedDocument {
     const indentText = indentMatch ? indentMatch[0] : '';
     const indent = indentText.replace(/\t/g, '  ').length;
     const content = rawLine.slice(indentText.length);
-    const match = content.match(/^([+-])\s+(\[(?:Done|Rejected|Question|Task|Idea|Low priority|Medium priority|High priority)?(?:,(?:Done|Rejected|Question|Task|Idea|Low priority|Medium priority|High priority))*\])\s?(.*)$/);
+    const match = content.match(/^([+-])\s+(\[[^\]]*\])(?:\s+(\[[^\]]*\]))?(?:\s(.*))?\s*$/);
     if (!match) {
       throw new Error(`Invalid SwiftMap line: "${rawLine}"`);
     }
 
     const collapsed = match[1] === '-';
-    const flags = parseFlags(match[2]);
-    const name = sanitizeName(match[3]);
+    const name = sanitizeName(match[4] ?? '');
+    const parsedAspects = match[3]
+      ? parseCanonicalAspects(match[2], match[3], rawLine)
+      : parseLegacyAspects(match[2], rawLine);
     const node: MindMapNode = {
       name,
       collapsed,
-      flags,
+      tags: parsedAspects.tags,
+      priority: parsedAspects.priority,
       children: [],
     };
 
@@ -66,7 +70,8 @@ export function parseDocument(text: string): ParsedDocument {
     root = {
       name: 'Root',
       collapsed: false,
-      flags: [],
+      tags: [],
+      priority: 0,
       children: [],
     };
   }
@@ -94,8 +99,9 @@ export function serializeDocument(root: MindMapNode): string {
   const visit = (node: MindMapNode, depth: number) => {
     const indent = '  '.repeat(depth);
     const status = node.collapsed ? '-' : '+';
-    const flags = node.flags.length > 0 ? `[${node.flags.map(formatFlag).join(',')}]` : '[]';
-    lines.push(`${indent}${status} ${flags} ${sanitizeName(node.name)}`);
+    const priority = `[${node.priority === 0 ? '' : formatPriority(node.priority)}]`;
+    const tags = node.tags.length > 0 ? `[${node.tags.map(formatTag).join(',')}]` : '[]';
+    lines.push(`${indent}${status} ${priority} ${tags} ${sanitizeName(node.name)}`);
     for (const child of node.children) {
       visit(child, depth + 1);
     }
@@ -110,7 +116,8 @@ export function serializeForWebview(node: MindMapNode, path: string): Serialized
     path,
     name: node.name,
     collapsed: node.collapsed,
-    flags: [...node.flags],
+    tags: [...node.tags],
+    priority: node.priority,
     children: node.children.map((child, index) => serializeForWebview(child, `${path}.${index}`)),
   };
 }
@@ -147,7 +154,8 @@ export async function applyWebviewMessage(
       parent.children.push({
         name: '',
         collapsed: false,
-        flags: [],
+        tags: [],
+        priority: 0,
         children: [],
       });
       result = { selectedPath: `${message.path}.${childIndex}`, editPath: `${message.path}.${childIndex}` };
@@ -165,7 +173,8 @@ export async function applyWebviewMessage(
       parent.children.splice(insertIndex, 0, {
         name: '',
         collapsed: false,
-        flags: [],
+        tags: [],
+        priority: 0,
         children: [],
       });
       const nextPath = formatPath([...parentPath, insertIndex]);
@@ -282,15 +291,21 @@ export async function applyWebviewMessage(
       result = { selectedPath: path.length === 1 ? '0' : formatPath(path.slice(0, -1)) };
       break;
     }
-    case 'toggleFlag': {
+    case 'toggleTag': {
       const node = getNodeByPath(parsed.root, path);
-      const current = new Set(node.flags);
-      if (current.has(message.flag)) {
-        current.delete(message.flag);
+      const current = new Set(node.tags);
+      if (current.has(message.tag)) {
+        current.delete(message.tag);
       } else {
-        current.add(message.flag);
+        current.add(message.tag);
       }
-      node.flags = Array.from(current).sort((a, b) => a - b) as Flag[];
+      node.tags = Array.from(current).sort((a, b) => a - b) as Tag[];
+      result = { selectedPath: message.path };
+      break;
+    }
+    case 'setPriority': {
+      const node = getNodeByPath(parsed.root, path);
+      node.priority = node.priority === message.priority ? 0 : message.priority;
       result = { selectedPath: message.path };
       break;
     }
@@ -318,50 +333,84 @@ export async function applyWebviewMessage(
   return result;
 }
 
-function parseFlags(input: string): Flag[] {
+function parseLegacyAspects(tagToken: string, rawLine: string): { tags: Tag[]; priority: Priority } {
+  const tokens = parseAspectTokens(tagToken, rawLine);
+  return splitAspects(tokens, tagToken, rawLine);
+}
+
+function parseCanonicalAspects(firstToken: string, secondToken: string, rawLine: string): { tags: Tag[]; priority: Priority } {
+  try {
+    const priority = parsePriorityToken(firstToken, rawLine);
+    const tags = parseTagsToken(secondToken, rawLine);
+    return { tags, priority };
+  } catch (firstError) {
+    try {
+      const tags = parseTagsToken(firstToken, rawLine);
+      const priority = parsePriorityToken(secondToken, rawLine);
+      return { tags, priority };
+    } catch {
+      throw firstError;
+    }
+  }
+}
+
+function splitAspects(tokens: AspectToken[], token: string, rawLine: string): { tags: Tag[]; priority: Priority } {
+  const tags = tokens.filter(isTagToken).map(toTagValue);
+  const priorities = tokens.filter(isPriorityToken).map(toPriorityValue);
+  if (new Set(tags).size !== tags.length) {
+    throw new Error(`Duplicated tags token "${token}"`);
+  }
+  if (priorities.length > 1) {
+    throw new Error(`Only one priority is allowed, got "${token}"`);
+  }
+  if (tags.some((tag, index) => index > 0 && tags[index - 1] > tag)) {
+    throw new Error(`Tags must be ordered as [Done,Rejected,Question,Task,Idea], got "${token}"`);
+  }
+  if (tokens.some((value, index) => index > 0 && aspectRank(tokens[index - 1]) > aspectRank(value))) {
+    throw new Error(`Aspects must be ordered as [Done,Rejected,Question,Task,Idea,Low priority,Medium priority,High priority], got "${rawLine}"`);
+  }
+  return { tags, priority: priorities[0] ?? 0 };
+}
+
+function parseTagsToken(input: string, rawLine: string): Tag[] {
+  const tokens = parseAspectTokens(input, rawLine);
+  if (tokens.some(isPriorityToken)) {
+    throw new Error(`Tags token cannot contain priority values, got "${input}"`);
+  }
+  const tags = tokens.filter(isTagToken).map(toTagValue);
+  if (new Set(tags).size !== tags.length) {
+    throw new Error(`Duplicated tags token "${input}"`);
+  }
+  if (tags.some((tag, index) => index > 0 && tags[index - 1] > tag)) {
+    throw new Error(`Tags must be ordered as [Done,Rejected,Question,Task,Idea], got "${input}"`);
+  }
+  return tags;
+}
+
+function parsePriorityToken(input: string, rawLine: string): Priority {
+  const tokens = parseAspectTokens(input, rawLine);
+  if (tokens.length === 0) {
+    return 0;
+  }
+  if (tokens.length > 1) {
+    throw new Error(`Priority token can contain only one value, got "${input}"`);
+  }
+  if (!isPriorityToken(tokens[0])) {
+    throw new Error(`Priority token must be empty or one of [Low priority,Medium priority,High priority], got "${input}"`);
+  }
+  return toPriorityValue(tokens[0]);
+}
+
+type AspectToken = 'Done' | 'Rejected' | 'Question' | 'Task' | 'Idea' | 'Low priority' | 'Medium priority' | 'High priority';
+
+function parseAspectTokens(input: string, rawLine: string): AspectToken[] {
   if (input === '[]') {
     return [];
   }
   if (!/^\[(Done|Rejected|Question|Task|Idea|Low priority|Medium priority|High priority)(,(Done|Rejected|Question|Task|Idea|Low priority|Medium priority|High priority))*\]$/.test(input)) {
-    throw new Error(`Invalid flags token "${input}"`);
+    throw new Error(`Invalid aspects token "${input}" in line "${rawLine}"`);
   }
-
-  const names = input.slice(1, -1).split(',');
-  const flags = names.map((name) => {
-    if (name === 'Done') {
-      return 1;
-    }
-    if (name === 'Rejected') {
-      return 2;
-    }
-    if (name === 'Question') {
-      return 3;
-    }
-    if (name === 'Task') {
-      return 4;
-    }
-    if (name === 'Idea') {
-      return 5;
-    }
-    if (name === 'Low priority') {
-      return 6;
-    }
-    if (name === 'Medium priority') {
-      return 7;
-    }
-    if (name === 'High priority') {
-      return 8;
-    }
-    throw new Error(`Unknown flag "${name}"`);
-  }) as Flag[];
-
-  if (new Set(flags).size !== flags.length) {
-    throw new Error(`Duplicated flags token "${input}"`);
-  }
-  if (flags.some((flag, index) => index > 0 && flags[index - 1] > flag)) {
-    throw new Error(`Flags must be ordered as [Done,Rejected,Question,Task,Idea,Low priority,Medium priority,High priority], got "${input}"`);
-  }
-  return flags;
+  return input.slice(1, -1).split(',') as AspectToken[];
 }
 
 function formatPath(path: number[]): string {
@@ -413,29 +462,89 @@ function sanitizeName(value: string): string {
   return value.replace(/[\r\n]+/g, ' ').trim();
 }
 
-function formatFlag(flag: Flag): 'Done' | 'Rejected' | 'Question' | 'Task' | 'Idea' | 'Low priority' | 'Medium priority' | 'High priority' {
-  if (flag === 1) {
+function isTagToken(token: AspectToken): token is 'Done' | 'Rejected' | 'Question' | 'Task' | 'Idea' {
+  return token === 'Done' || token === 'Rejected' || token === 'Question' || token === 'Task' || token === 'Idea';
+}
+
+function isPriorityToken(token: AspectToken): token is 'Low priority' | 'Medium priority' | 'High priority' {
+  return token === 'Low priority' || token === 'Medium priority' || token === 'High priority';
+}
+
+function formatTag(tag: Tag): 'Done' | 'Rejected' | 'Question' | 'Task' | 'Idea' {
+  if (tag === 1) {
     return 'Done';
   }
-  if (flag === 2) {
+  if (tag === 2) {
     return 'Rejected';
   }
-  if (flag === 3) {
+  if (tag === 3) {
     return 'Question';
   }
-  if (flag === 4) {
+  if (tag === 4) {
     return 'Task';
   }
-  if (flag === 5) {
-    return 'Idea';
-  }
-  if (flag === 6) {
+  return 'Idea';
+}
+
+function formatPriority(priority: Priority): 'Low priority' | 'Medium priority' | 'High priority' {
+  if (priority === 1) {
     return 'Low priority';
   }
-  if (flag === 7) {
+  if (priority === 2) {
     return 'Medium priority';
   }
   return 'High priority';
+}
+
+function toTagValue(token: 'Done' | 'Rejected' | 'Question' | 'Task' | 'Idea'): Tag {
+  if (token === 'Done') {
+    return 1;
+  }
+  if (token === 'Rejected') {
+    return 2;
+  }
+  if (token === 'Question') {
+    return 3;
+  }
+  if (token === 'Task') {
+    return 4;
+  }
+  return 5;
+}
+
+function toPriorityValue(token: 'Low priority' | 'Medium priority' | 'High priority'): Priority {
+  if (token === 'Low priority') {
+    return 1;
+  }
+  if (token === 'Medium priority') {
+    return 2;
+  }
+  return 3;
+}
+
+function aspectRank(token: AspectToken): number {
+  if (token === 'Done') {
+    return 1;
+  }
+  if (token === 'Rejected') {
+    return 2;
+  }
+  if (token === 'Question') {
+    return 3;
+  }
+  if (token === 'Task') {
+    return 4;
+  }
+  if (token === 'Idea') {
+    return 5;
+  }
+  if (token === 'Low priority') {
+    return 6;
+  }
+  if (token === 'Medium priority') {
+    return 7;
+  }
+  return 8;
 }
 
 async function replaceDocument(document: vscode.TextDocument, text: string): Promise<void> {

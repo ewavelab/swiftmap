@@ -1,10 +1,12 @@
-export type Flag = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type Tag = 1 | 2 | 3 | 4 | 5;
+export type Priority = 0 | 1 | 2 | 3;
 
 export interface SerializedNode {
   path: string;
   name: string;
   collapsed: boolean;
-  flags: Flag[];
+  tags: Tag[];
+  priority: Priority;
   children: SerializedNode[];
 }
 
@@ -42,7 +44,8 @@ export type WebviewMessage =
   | { type: 'reparentNodes'; paths: string[]; targetPath: string }
   | { type: 'toggleCollapse'; path: string }
   | { type: 'deleteNode'; path: string }
-  | { type: 'toggleFlag'; path: string; flag: Flag }
+  | { type: 'toggleTag'; path: string; tag: Tag }
+  | { type: 'setPriority'; path: string; priority: Priority }
   | { type: 'moveNode'; path: string; direction: 'up' | 'down' }
   | { type: 'exportPngResult'; requestId: string; dataUrl: string }
   | { type: 'exportPngError'; requestId: string; message: string };

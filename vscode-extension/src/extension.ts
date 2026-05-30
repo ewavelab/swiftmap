@@ -12,7 +12,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('swiftmap.newDocument', async () => {
       const doc = await vscode.workspace.openTextDocument({
         language: 'swiftmap',
-        content: '+ [] Root',
+        content: '+ [] [] Root',
       });
       await vscode.window.showTextDocument(doc, { preview: false });
     }),

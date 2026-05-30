@@ -76,14 +76,14 @@
         'Enter/F2 edit, double-click edit, Shift+Enter add child, ' +
         altLabel + '+Enter add sibling below, Shift+' + altLabel + '+Enter add sibling above, ' +
         'Space collapse, Delete remove, ' +
-        'Ctrl+' + altLabel + '+1 done, ' +
-        'Ctrl+' + altLabel + '+2 rejected, ' +
-        'Ctrl+' + altLabel + '+3 question, ' +
-        'Ctrl+' + altLabel + '+4 task, ' +
-        'Ctrl+' + altLabel + '+5 idea, ' +
-        'Ctrl+' + altLabel + '+6 low priority, ' +
-        'Ctrl+' + altLabel + '+7 medium priority, ' +
-        'Ctrl+' + altLabel + '+8 high priority, Ctrl+Up/Down reorder.';
+        'Ctrl+' + altLabel + '+1 low priority, ' +
+        'Ctrl+' + altLabel + '+2 medium priority, ' +
+        'Ctrl+' + altLabel + '+3 high priority, ' +
+        'Ctrl+' + altLabel + '+4 done, ' +
+        'Ctrl+' + altLabel + '+5 rejected, ' +
+        'Ctrl+' + altLabel + '+6 question, ' +
+        'Ctrl+' + altLabel + '+7 task, ' +
+        'Ctrl+' + altLabel + '+8 idea, Ctrl+Up/Down reorder.';
       hintEl.classList.toggle('collapsed', state.hintCollapsed);
       hintToggleEl.textContent = state.hintCollapsed ? 'Show' : 'Hide';
     }
@@ -163,7 +163,8 @@
         path: node.path,
         name: node.name,
         collapsed: false,
-        flags: [...node.flags],
+        tags: [...node.tags],
+        priority: node.priority,
         children: node.children.map((child) => cloneTreeExpanded(child)),
       };
     }
@@ -303,16 +304,16 @@
 
         const hasChildren = entry.node.children.length > 0;
         const collapseIndicator = hasChildren ? (entry.node.collapsed ? '+' : '−') : '';
-        const doneBadge = entry.node.flags.includes(1) ? '<span class="badge flag-done">✓ Done</span>' : '';
-        const rejectedBadge = entry.node.flags.includes(2) ? '<span class="badge flag-rejected">✕ Rejected</span>' : '';
-        const questionBadge = entry.node.flags.includes(3) ? '<span class="badge flag-question">? Question</span>' : '';
-        const taskBadge = entry.node.flags.includes(4) ? '<span class="badge flag-task">☰ Task</span>' : '';
-        const ideaBadge = entry.node.flags.includes(5) ? '<span class="badge flag-idea">💡 Idea</span>' : '';
-        const lowPriorityBadge = entry.node.flags.includes(6) ? '<span class="badge flag-priority-low">Low priority</span>' : '';
-        const mediumPriorityBadge = entry.node.flags.includes(7) ? '<span class="badge flag-priority-medium">Medium priority</span>' : '';
-        const highPriorityBadge = entry.node.flags.includes(8) ? '<span class="badge flag-priority-high">High priority</span>' : '';
-        const flagsMarkup = doneBadge + rejectedBadge + questionBadge + taskBadge + ideaBadge + lowPriorityBadge + mediumPriorityBadge + highPriorityBadge;
-        const metaMarkup = flagsMarkup ? '<div class="meta has-flags">' + flagsMarkup + '</div>' : '';
+        const priorityBadge = getPriorityBadgeDefinition(entry.node.priority);
+        const tagsMarkup = getTagBadgeDefinitions(entry.node.tags).map(renderBadgeMarkup).join('');
+        const metaRows = [];
+        if (priorityBadge) {
+          metaRows.push('<div class="meta-row priority-row">' + renderBadgeMarkup(priorityBadge) + '</div>');
+        }
+        if (tagsMarkup) {
+          metaRows.push('<div class="meta-row tags-row">' + tagsMarkup + '</div>');
+        }
+        const metaMarkup = metaRows.length > 0 ? '<div class="meta">' + metaRows.join('') + '</div>' : '';
 
         nodeEl.innerHTML =
           '<div class="node-header">' +
@@ -632,14 +633,18 @@
       ]);
 
       appendContextMenuSection([
-        { label: '✓ Done', className: 'flag-done', checked: entry.node.flags.includes(1), run: () => post({ type: 'toggleFlag', path, flag: 1 }) },
-        { label: '✕ Rejected', className: 'flag-rejected', checked: entry.node.flags.includes(2), run: () => post({ type: 'toggleFlag', path, flag: 2 }) },
-        { label: '? Question', className: 'flag-question', checked: entry.node.flags.includes(3), run: () => post({ type: 'toggleFlag', path, flag: 3 }) },
-        { label: '☰ Task', className: 'flag-task', checked: entry.node.flags.includes(4), run: () => post({ type: 'toggleFlag', path, flag: 4 }) },
-        { label: '💡 Idea', className: 'flag-idea', checked: entry.node.flags.includes(5), run: () => post({ type: 'toggleFlag', path, flag: 5 }) },
-        { label: 'Low priority', className: 'flag-priority-low', checked: entry.node.flags.includes(6), run: () => post({ type: 'toggleFlag', path, flag: 6 }) },
-        { label: 'Medium priority', className: 'flag-priority-medium', checked: entry.node.flags.includes(7), run: () => post({ type: 'toggleFlag', path, flag: 7 }) },
-        { label: 'High priority', className: 'flag-priority-high', checked: entry.node.flags.includes(8), run: () => post({ type: 'toggleFlag', path, flag: 8 }) },
+        { label: 'No priority', checked: entry.node.priority === 0, run: () => post({ type: 'setPriority', path, priority: 0 }) },
+        { label: 'Low priority', className: 'priority-low', checked: entry.node.priority === 1, run: () => post({ type: 'setPriority', path, priority: 1 }) },
+        { label: 'Medium priority', className: 'priority-medium', checked: entry.node.priority === 2, run: () => post({ type: 'setPriority', path, priority: 2 }) },
+        { label: 'High priority', className: 'priority-high', checked: entry.node.priority === 3, run: () => post({ type: 'setPriority', path, priority: 3 }) },
+      ]);
+
+      appendContextMenuSection([
+        { label: '✓ Done', className: 'tag-done', checked: entry.node.tags.includes(1), run: () => post({ type: 'toggleTag', path, tag: 1 }) },
+        { label: '✕ Rejected', className: 'tag-rejected', checked: entry.node.tags.includes(2), run: () => post({ type: 'toggleTag', path, tag: 2 }) },
+        { label: '? Question', className: 'tag-question', checked: entry.node.tags.includes(3), run: () => post({ type: 'toggleTag', path, tag: 3 }) },
+        { label: '☰ Task', className: 'tag-task', checked: entry.node.tags.includes(4), run: () => post({ type: 'toggleTag', path, tag: 4 }) },
+        { label: '💡 Idea', className: 'tag-idea', checked: entry.node.tags.includes(5), run: () => post({ type: 'toggleTag', path, tag: 5 }) },
       ]);
 
       contextMenuEl.classList.add('open');
@@ -921,24 +926,27 @@
       const charsPerLine = 22;
       const lines = Math.max(1, Math.ceil((node.name || ' ').length / charsPerLine));
       const nameHeight = lines * 16;
-      const flagCount = node.flags.length;
-      const flagRows = flagCount > 0 ? Math.ceil(flagCount / 2) : 0;
-      const flagsHeight = flagRows > 0 ? flagRows * 14 + 3 : 0;
-      return Math.max(layoutConfig.nodeHeight, 14 + nameHeight + flagsHeight);
+      const tagCount = node.tags.length;
+      const tagRows = tagCount > 0 ? Math.ceil(tagCount / 2) : 0;
+      const tagsHeight = tagRows > 0 ? tagRows * 14 + 3 : 0;
+      const priorityHeight = node.priority !== 0 ? 17 : 0;
+      return Math.max(layoutConfig.nodeHeight, 14 + nameHeight + tagsHeight + priorityHeight);
     }
 
     function getExportNodeHeight(ctx, path, node) {
       const textXOffset = 34;
       const textMaxWidth = layoutConfig.nodeWidth - textXOffset - 12;
       const textLines = wrapText(ctx, node.name || ' ', textMaxWidth);
-      const badges = getFlagBadgeDefinitions(node.flags);
+      const tagBadges = getTagBadgeDefinitions(node.tags);
+      const priorityBadge = getPriorityBadgeDefinition(node.priority);
       const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
       ctx.save();
       ctx.font = badgeFont;
-      const badgeRows = countBadgeRows(ctx, badges, textMaxWidth);
+      const tagBadgeRows = countBadgeRows(ctx, tagBadges, textMaxWidth);
       ctx.restore();
-      const flagsHeight = badgeRows > 0 ? 3 + (badgeRows * 14) + ((badgeRows - 1) * 3) : 0;
-      return Math.max(layoutConfig.nodeHeight, 8 + Math.max(18, textLines.length * 18) + flagsHeight + 8);
+      const tagsHeight = tagBadgeRows > 0 ? 3 + (tagBadgeRows * 14) + ((tagBadgeRows - 1) * 3) : 0;
+      const priorityHeight = priorityBadge ? 17 : 0;
+      return Math.max(layoutConfig.nodeHeight, 8 + Math.max(18, textLines.length * 18) + tagsHeight + priorityHeight + 8);
     }
 
     function readCssVar(name) {
@@ -1031,17 +1039,31 @@
       return lines.length > 0 ? lines : [source];
     }
 
-    function getFlagBadgeDefinitions(flags) {
+    function getTagBadgeDefinitions(tags) {
       return [
-        flags.includes(1) ? { label: '✓ Done', color: getExportColors().done } : null,
-        flags.includes(2) ? { label: '✕ Rejected', color: getExportColors().rejected } : null,
-        flags.includes(3) ? { label: '? Question', color: getExportColors().question } : null,
-        flags.includes(4) ? { label: '☰ Task', color: getExportColors().task } : null,
-        flags.includes(5) ? { label: '💡 Idea', color: getExportColors().idea } : null,
-        flags.includes(6) ? { label: 'Low priority', color: getExportColors().priorityLow } : null,
-        flags.includes(7) ? { label: 'Medium priority', color: getExportColors().priorityMedium } : null,
-        flags.includes(8) ? { label: 'High priority', color: getExportColors().priorityHigh } : null,
+        tags.includes(1) ? { label: '✓ Done', className: 'tag-done', color: getExportColors().done } : null,
+        tags.includes(2) ? { label: '✕ Rejected', className: 'tag-rejected', color: getExportColors().rejected } : null,
+        tags.includes(3) ? { label: '? Question', className: 'tag-question', color: getExportColors().question } : null,
+        tags.includes(4) ? { label: '☰ Task', className: 'tag-task', color: getExportColors().task } : null,
+        tags.includes(5) ? { label: '💡 Idea', className: 'tag-idea', color: getExportColors().idea } : null,
       ].filter(Boolean);
+    }
+
+    function getPriorityBadgeDefinition(priority) {
+      if (priority === 0) {
+        return null;
+      }
+      if (priority === 1) {
+        return { label: 'Low priority', className: 'priority-low', color: getExportColors().priorityLow };
+      }
+      if (priority === 2) {
+        return { label: 'Medium priority', className: 'priority-medium', color: getExportColors().priorityMedium };
+      }
+      return { label: 'High priority', className: 'priority-high', color: getExportColors().priorityHigh };
+    }
+
+    function renderBadgeMarkup(badge) {
+      return '<span class="badge ' + badge.className + '">' + escapeHtml(badge.label) + '</span>';
     }
 
     function countBadgeRows(ctx, badges, availableWidth) {
@@ -1073,17 +1095,21 @@
       const textXOffset = nodePaddingX + collapseSize + gap;
       const textMaxWidth = layoutConfig.nodeWidth - textXOffset - nodePaddingX;
       const textLines = wrapText(ctx, node.name || ' ', textMaxWidth);
-      const badges = getFlagBadgeDefinitions(node.flags);
+      const tagBadges = getTagBadgeDefinitions(node.tags);
+      const priorityBadge = getPriorityBadgeDefinition(node.priority);
       const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
       ctx.save();
       ctx.font = badgeFont;
-      const badgeRows = countBadgeRows(ctx, badges, textMaxWidth);
+      const tagBadgeRows = countBadgeRows(ctx, tagBadges, textMaxWidth);
       ctx.restore();
       const headerHeight = Math.max(collapseSize, textLines.length * 19);
+      const tagsHeight = tagBadgeRows > 0 ? 3 + (tagBadgeRows * 14) + ((tagBadgeRows - 1) * 3) : 0;
+      const priorityHeight = priorityBadge ? 17 : 0;
       return {
         textLines,
-        badgeRows,
-        height: Math.max(layoutConfig.nodeHeight, 10 + headerHeight + (badgeRows > 0 ? 4 + (badgeRows * 16) + ((badgeRows - 1) * 4) : 0) + 10),
+        tagBadgeRows,
+        hasPriority: Boolean(priorityBadge),
+        height: Math.max(layoutConfig.nodeHeight, 10 + headerHeight + tagsHeight + priorityHeight + 10),
       };
     }
 
@@ -1163,9 +1189,31 @@
         ctx.fillText(textLines[index], textX, textTop + index * lineHeight);
       }
 
-      const badges = getFlagBadgeDefinitions(node.flags);
-      if (badges.length > 0) {
-        const badgeTop = textTop + textLines.length * lineHeight + 3;
+      const priorityBadge = getPriorityBadgeDefinition(node.priority);
+      const tagBadges = getTagBadgeDefinitions(node.tags);
+      let contentBottom = textTop + textLines.length * lineHeight;
+
+      if (priorityBadge) {
+        const badgeTop = contentBottom + 3;
+        const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
+        ctx.font = badgeFont;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        const badgeWidth = ctx.measureText(priorityBadge.label).width + 14;
+        const badgeHeight = 14;
+        ctx.fillStyle = withAlpha(colors.bg, 1);
+        ctx.strokeStyle = withAlpha(colors.fg, 0.08);
+        ctx.lineWidth = 1;
+        roundRect(ctx, textX, badgeTop, badgeWidth, badgeHeight, 999);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = priorityBadge.color;
+        ctx.fillText(priorityBadge.label, textX + 6, badgeTop + 7);
+        contentBottom = badgeTop + badgeHeight;
+      }
+
+      if (tagBadges.length > 0) {
+        const badgeTop = contentBottom + 3;
         const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
         ctx.font = badgeFont;
         ctx.textBaseline = 'middle';
@@ -1177,8 +1225,8 @@
         const maxBadgeWidth = width - (textX - x) - 12;
         let rowWidth = 0;
         const rowHeight = 14;
-        for (let index = 0; index < badges.length; index += 1) {
-          const badge = badges[index];
+        for (let index = 0; index < tagBadges.length; index += 1) {
+          const badge = tagBadges[index];
           const badgeWidth = ctx.measureText(badge.label).width + 14;
           if (badgeX !== textX && rowWidth + badgeWidth > maxBadgeWidth) {
             badgeX = textX;
@@ -1505,10 +1553,19 @@
         }
         if (event.altKey && /^[1-8]$/.test(event.key)) {
           event.preventDefault();
+          const key = Number(event.key);
+          if (key <= 3) {
+            post({
+              type: 'setPriority',
+              path: state.selectedPath,
+              priority: key,
+            });
+            return;
+          }
           post({
-            type: 'toggleFlag',
+            type: 'toggleTag',
             path: state.selectedPath,
-            flag: Number(event.key),
+            tag: key - 3,
           });
           return;
         }
