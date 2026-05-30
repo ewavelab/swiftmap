@@ -1,12 +1,14 @@
-export type Tag = 1 | 2 | 3 | 4 | 5;
+export type Status = 0 | 1 | 2 | 3 | 4;
 export type Priority = 0 | 1 | 2 | 3;
+export type Tag = 1 | 2 | 3;
 
 export interface SerializedNode {
   path: string;
   name: string;
   collapsed: boolean;
-  tags: Tag[];
+  status: Status;
   priority: Priority;
+  tags: Tag[];
   children: SerializedNode[];
 }
 
@@ -44,6 +46,7 @@ export type WebviewMessage =
   | { type: 'reparentNodes'; paths: string[]; targetPath: string }
   | { type: 'toggleCollapse'; path: string }
   | { type: 'deleteNode'; path: string }
+  | { type: 'setStatus'; path: string; status: Status }
   | { type: 'toggleTag'; path: string; tag: Tag }
   | { type: 'setPriority'; path: string; priority: Priority }
   | { type: 'moveNode'; path: string; direction: 'up' | 'down' }

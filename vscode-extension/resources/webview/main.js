@@ -79,11 +79,13 @@
         'Ctrl+' + altLabel + '+1 low priority, ' +
         'Ctrl+' + altLabel + '+2 medium priority, ' +
         'Ctrl+' + altLabel + '+3 high priority, ' +
-        'Ctrl+' + altLabel + '+4 done, ' +
-        'Ctrl+' + altLabel + '+5 rejected, ' +
-        'Ctrl+' + altLabel + '+6 question, ' +
-        'Ctrl+' + altLabel + '+7 task, ' +
-        'Ctrl+' + altLabel + '+8 idea, Ctrl+Up/Down reorder.';
+        'Ctrl+' + altLabel + '+4 in progress, ' +
+        'Ctrl+' + altLabel + '+5 blocked, ' +
+        'Ctrl+' + altLabel + '+6 done, ' +
+        'Ctrl+' + altLabel + '+7 rejected, ' +
+        'Ctrl+' + altLabel + '+8 question, ' +
+        'Ctrl+' + altLabel + '+9 task, ' +
+        'Ctrl+' + altLabel + '+0 idea, Ctrl+Up/Down reorder.';
       hintEl.classList.toggle('collapsed', state.hintCollapsed);
       hintToggleEl.textContent = state.hintCollapsed ? 'Show' : 'Hide';
     }
@@ -164,6 +166,7 @@
         name: node.name,
         collapsed: false,
         tags: [...node.tags],
+        status: node.status,
         priority: node.priority,
         children: node.children.map((child) => cloneTreeExpanded(child)),
       };
@@ -305,10 +308,12 @@
         const hasChildren = entry.node.children.length > 0;
         const collapseIndicator = hasChildren ? (entry.node.collapsed ? '+' : '−') : '';
         const priorityBadge = getPriorityBadgeDefinition(entry.node.priority);
+        const statusBadge = getStatusBadgeDefinition(entry.node.status);
         const tagsMarkup = getTagBadgeDefinitions(entry.node.tags).map(renderBadgeMarkup).join('');
         const metaRows = [];
-        if (priorityBadge) {
-          metaRows.push('<div class="meta-row priority-row">' + renderBadgeMarkup(priorityBadge) + '</div>');
+        const priorityStatusMarkup = [priorityBadge, statusBadge].filter(Boolean).map(renderBadgeMarkup).join('');
+        if (priorityStatusMarkup) {
+          metaRows.push('<div class="meta-row status-priority-row">' + priorityStatusMarkup + '</div>');
         }
         if (tagsMarkup) {
           metaRows.push('<div class="meta-row tags-row">' + tagsMarkup + '</div>');
@@ -648,11 +653,17 @@
       ]);
 
       appendContextMenuSection(rightColumn, [
-        { label: '✓ Done', className: 'tag-done', checked: entry.node.tags.includes(1), run: () => post({ type: 'toggleTag', path, tag: 1 }) },
-        { label: '✕ Rejected', className: 'tag-rejected', checked: entry.node.tags.includes(2), run: () => post({ type: 'toggleTag', path, tag: 2 }) },
-        { label: '? Question', className: 'tag-question', checked: entry.node.tags.includes(3), run: () => post({ type: 'toggleTag', path, tag: 3 }) },
-        { label: '☰ Task', className: 'tag-task', checked: entry.node.tags.includes(4), run: () => post({ type: 'toggleTag', path, tag: 4 }) },
-        { label: '💡 Idea', className: 'tag-idea', checked: entry.node.tags.includes(5), run: () => post({ type: 'toggleTag', path, tag: 5 }) },
+        { label: 'No status', checked: entry.node.status === 0, run: () => post({ type: 'setStatus', path, status: 0 }) },
+        { label: 'In progress', className: 'status-progress', checked: entry.node.status === 1, run: () => post({ type: 'setStatus', path, status: 1 }) },
+        { label: 'Blocked', className: 'status-blocked', checked: entry.node.status === 2, run: () => post({ type: 'setStatus', path, status: 2 }) },
+        { label: 'Done', className: 'status-done', checked: entry.node.status === 3, run: () => post({ type: 'setStatus', path, status: 3 }) },
+        { label: 'Rejected', className: 'status-rejected', checked: entry.node.status === 4, run: () => post({ type: 'setStatus', path, status: 4 }) },
+      ]);
+
+      appendContextMenuSection(rightColumn, [
+        { label: '? Question', className: 'tag-question', checked: entry.node.tags.includes(1), run: () => post({ type: 'toggleTag', path, tag: 1 }) },
+        { label: '☰ Task', className: 'tag-task', checked: entry.node.tags.includes(2), run: () => post({ type: 'toggleTag', path, tag: 2 }) },
+        { label: '💡 Idea', className: 'tag-idea', checked: entry.node.tags.includes(3), run: () => post({ type: 'toggleTag', path, tag: 3 }) },
       ]);
 
       contextMenuEl.classList.add('open');
@@ -937,14 +948,15 @@
       const tagCount = node.tags.length;
       const tagRows = tagCount > 0 ? Math.ceil(tagCount / 2) : 0;
       const tagsHeight = tagRows > 0 ? tagRows * 14 + 3 : 0;
-      const priorityHeight = node.priority !== 0 ? 17 : 0;
-      return Math.max(layoutConfig.nodeHeight, 14 + nameHeight + tagsHeight + priorityHeight);
+      const statusPriorityHeight = node.status !== 0 || node.priority !== 0 ? 17 : 0;
+      return Math.max(layoutConfig.nodeHeight, 14 + nameHeight + tagsHeight + statusPriorityHeight);
     }
 
     function getExportNodeHeight(ctx, path, node) {
       const textXOffset = 34;
       const textMaxWidth = layoutConfig.nodeWidth - textXOffset - 12;
       const textLines = wrapText(ctx, node.name || ' ', textMaxWidth);
+      const statusBadge = getStatusBadgeDefinition(node.status);
       const tagBadges = getTagBadgeDefinitions(node.tags);
       const priorityBadge = getPriorityBadgeDefinition(node.priority);
       const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
@@ -953,8 +965,8 @@
       const tagBadgeRows = countBadgeRows(ctx, tagBadges, textMaxWidth);
       ctx.restore();
       const tagsHeight = tagBadgeRows > 0 ? 3 + (tagBadgeRows * 14) + ((tagBadgeRows - 1) * 3) : 0;
-      const priorityHeight = priorityBadge ? 17 : 0;
-      return Math.max(layoutConfig.nodeHeight, 8 + Math.max(18, textLines.length * 18) + tagsHeight + priorityHeight + 8);
+      const statusPriorityHeight = statusBadge || priorityBadge ? 17 : 0;
+      return Math.max(layoutConfig.nodeHeight, 8 + Math.max(18, textLines.length * 18) + tagsHeight + statusPriorityHeight + 8);
     }
 
     function readCssVar(name) {
@@ -978,8 +990,10 @@
         nodeRootSelectedFillStart: readCssVar('--node-root-selected-fill-start') || 'rgba(30, 156, 170, 0.22)',
         nodeRootSelectedFillEnd: readCssVar('--node-root-selected-fill-end') || 'rgba(233, 248, 250, 0.94)',
         nodeRootSelectedBorder: readCssVar('--node-root-selected-border') || '#1f848f',
-        done: readCssVar('--done') || '#2ea043',
-        rejected: readCssVar('--rejected') || '#cf222e',
+        statusBlocked: readCssVar('--status-blocked') || '#b45309',
+        statusDone: readCssVar('--status-done') || '#2ea043',
+        statusRejected: readCssVar('--status-rejected') || '#cf222e',
+        statusProgress: readCssVar('--status-progress') || '#0c7f88',
         question: readCssVar('--question') || '#1f6feb',
         task: readCssVar('--task') || '#7c3aed',
         idea: readCssVar('--idea') || '#d29922',
@@ -1047,13 +1061,27 @@
       return lines.length > 0 ? lines : [source];
     }
 
+    function getStatusBadgeDefinition(status) {
+      if (status === 0) {
+        return null;
+      }
+      if (status === 1) {
+        return { label: 'In progress', className: 'status-progress', color: getExportColors().statusProgress };
+      }
+      if (status === 2) {
+        return { label: 'Blocked', className: 'status-blocked', color: getExportColors().statusBlocked };
+      }
+      if (status === 3) {
+        return { label: 'Done', className: 'status-done', color: getExportColors().statusDone };
+      }
+      return { label: 'Rejected', className: 'status-rejected', color: getExportColors().statusRejected };
+    }
+
     function getTagBadgeDefinitions(tags) {
       return [
-        tags.includes(1) ? { label: '✓ Done', className: 'tag-done', color: getExportColors().done } : null,
-        tags.includes(2) ? { label: '✕ Rejected', className: 'tag-rejected', color: getExportColors().rejected } : null,
-        tags.includes(3) ? { label: '? Question', className: 'tag-question', color: getExportColors().question } : null,
-        tags.includes(4) ? { label: '☰ Task', className: 'tag-task', color: getExportColors().task } : null,
-        tags.includes(5) ? { label: '💡 Idea', className: 'tag-idea', color: getExportColors().idea } : null,
+        tags.includes(1) ? { label: '? Question', className: 'tag-question', color: getExportColors().question } : null,
+        tags.includes(2) ? { label: '☰ Task', className: 'tag-task', color: getExportColors().task } : null,
+        tags.includes(3) ? { label: '💡 Idea', className: 'tag-idea', color: getExportColors().idea } : null,
       ].filter(Boolean);
     }
 
@@ -1103,8 +1131,9 @@
       const textXOffset = nodePaddingX + collapseSize + gap;
       const textMaxWidth = layoutConfig.nodeWidth - textXOffset - nodePaddingX;
       const textLines = wrapText(ctx, node.name || ' ', textMaxWidth);
-      const tagBadges = getTagBadgeDefinitions(node.tags);
       const priorityBadge = getPriorityBadgeDefinition(node.priority);
+      const statusBadge = getStatusBadgeDefinition(node.status);
+      const tagBadges = getTagBadgeDefinitions(node.tags);
       const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
       ctx.save();
       ctx.font = badgeFont;
@@ -1112,12 +1141,12 @@
       ctx.restore();
       const headerHeight = Math.max(collapseSize, textLines.length * 19);
       const tagsHeight = tagBadgeRows > 0 ? 3 + (tagBadgeRows * 14) + ((tagBadgeRows - 1) * 3) : 0;
-      const priorityHeight = priorityBadge ? 17 : 0;
+      const statusPriorityHeight = priorityBadge || statusBadge ? 17 : 0;
       return {
         textLines,
         tagBadgeRows,
-        hasPriority: Boolean(priorityBadge),
-        height: Math.max(layoutConfig.nodeHeight, 10 + headerHeight + tagsHeight + priorityHeight + 10),
+        hasPriority: Boolean(statusBadge || priorityBadge),
+        height: Math.max(layoutConfig.nodeHeight, 10 + headerHeight + statusPriorityHeight + tagsHeight + 10),
       };
     }
 
@@ -1198,25 +1227,31 @@
       }
 
       const priorityBadge = getPriorityBadgeDefinition(node.priority);
+      const statusBadge = getStatusBadgeDefinition(node.status);
       const tagBadges = getTagBadgeDefinitions(node.tags);
       let contentBottom = textTop + textLines.length * lineHeight;
 
-      if (priorityBadge) {
+      if (priorityBadge || statusBadge) {
         const badgeTop = contentBottom + 3;
         const badgeFont = '10px ' + getComputedStyle(document.body).fontFamily;
         ctx.font = badgeFont;
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'left';
-        const badgeWidth = ctx.measureText(priorityBadge.label).width + 14;
         const badgeHeight = 14;
-        ctx.fillStyle = withAlpha(colors.bg, 1);
-        ctx.strokeStyle = withAlpha(colors.fg, 0.08);
-        ctx.lineWidth = 1;
-        roundRect(ctx, textX, badgeTop, badgeWidth, badgeHeight, 999);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = priorityBadge.color;
-        ctx.fillText(priorityBadge.label, textX + 6, badgeTop + 7);
+        const badgeGap = 5;
+        let badgeX = textX;
+        for (const badge of [priorityBadge, statusBadge].filter(Boolean)) {
+          const badgeWidth = ctx.measureText(badge.label).width + 14;
+          ctx.fillStyle = withAlpha(colors.bg, 1);
+          ctx.strokeStyle = withAlpha(colors.fg, 0.08);
+          ctx.lineWidth = 1;
+          roundRect(ctx, badgeX, badgeTop, badgeWidth, badgeHeight, 999);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = badge.color;
+          ctx.fillText(badge.label, badgeX + 6, badgeTop + 7);
+          badgeX += badgeWidth + badgeGap;
+        }
         contentBottom = badgeTop + badgeHeight;
       }
 
@@ -1568,10 +1603,10 @@
           post({ type: 'redo' });
           return;
         }
-        if (event.altKey && /^[1-8]$/.test(event.key)) {
+        if (event.altKey && /^[0-9]$/.test(event.key)) {
           event.preventDefault();
           const key = Number(event.key);
-          if (key <= 3) {
+          if (key >= 1 && key <= 3) {
             post({
               type: 'setPriority',
               path: state.selectedPath,
@@ -1579,10 +1614,18 @@
             });
             return;
           }
+          if (key >= 4 && key <= 7) {
+            post({
+              type: 'setStatus',
+              path: state.selectedPath,
+              status: key === 4 ? 1 : key === 5 ? 2 : key === 6 ? 3 : 4,
+            });
+            return;
+          }
           post({
             type: 'toggleTag',
             path: state.selectedPath,
-            tag: key - 3,
+            tag: key === 8 ? 1 : key === 9 ? 2 : 3,
           });
           return;
         }

@@ -11,8 +11,10 @@
       --border: rgba(14, 42, 57, 0.12);
       --accent: #37bdcb;
       --accent-deep: #0c7f88;
-      --done: #2ea043;
-      --rejected: #cf222e;
+      --status-blocked: #b45309;
+      --status-done: #2ea043;
+      --status-rejected: #cf222e;
+      --status-progress: #0c7f88;
       --question: #1f6feb;
       --task: #7c3aed;
       --idea: #d29922;
@@ -294,16 +296,20 @@
       white-space: nowrap;
     }
 
-    .tag-done {
-      color: var(--done);
+    .status-done {
+      color: var(--status-done);
     }
 
-    .tag-idea {
-      color: var(--idea);
+    .status-blocked {
+      color: var(--status-blocked);
     }
 
-    .tag-rejected {
-      color: var(--rejected);
+    .status-rejected {
+      color: var(--status-rejected);
+    }
+
+    .status-progress {
+      color: var(--status-progress);
     }
 
     .tag-question {
@@ -312,6 +318,10 @@
 
     .tag-task {
       color: var(--task);
+    }
+
+    .tag-idea {
+      color: var(--idea);
     }
 
     .priority-low {

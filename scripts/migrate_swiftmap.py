@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Migrate legacy SwiftMap files to the new tags + priority format.
+"""Migrate legacy SwiftMap files to the priority + status + tags format.
 
 Usage:
   python3 scripts/migrate_swiftmap.py file1.swiftmap file2.swiftmap ...
@@ -20,15 +20,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-TAG_ORDER = ["Done", "Rejected", "Question", "Task", "Idea"]
+STATUS_ORDER = ["In progress", "Blocked", "Done", "Rejected"]
 PRIORITY_ORDER = ["Low priority", "Medium priority", "High priority"]
-ASPECT_ORDER = TAG_ORDER + PRIORITY_ORDER
+TAG_ORDER = ["Question", "Task", "Idea"]
+
+ASPECT_ORDER = PRIORITY_ORDER + STATUS_ORDER + TAG_ORDER
 ASPECT_RANK = {name: index for index, name in enumerate(ASPECT_ORDER)}
 
-LINE_RE = re.compile(r"^([+-])\s+(\[[^\]]*\])(?:\s+(\[[^\]]*\]))?(?:\s(.*))?\s*$")
+LINE_RE = re.compile(r"^([+-])\s+(\[[^\]]*\])(?:\s+(\[[^\]]*\]))?(?:\s+(\[[^\]]*\]))?(?:\s(.*))?\s*$")
 ASPECT_RE = re.compile(
-    r"^\[(Done|Rejected|Question|Task|Idea|Low priority|Medium priority|High priority)"
-    r"(,(Done|Rejected|Question|Task|Idea|Low priority|Medium priority|High priority))*\]$"
+    r"^\[(In progress|Blocked|Done|Rejected|Low priority|Medium priority|High priority|Question|Task|Idea)"
+    r"(,(In progress|Blocked|Done|Rejected|Low priority|Medium priority|High priority|Question|Task|Idea))*\]$"
 )
 
 
@@ -36,8 +38,9 @@ ASPECT_RE = re.compile(
 class Node:
     name: str
     collapsed: bool
-    tags: list[str] = field(default_factory=list)
+    status: str = ""
     priority: str = ""
+    tags: list[str] = field(default_factory=list)
     children: list["Node"] = field(default_factory=list)
 
 
@@ -63,7 +66,7 @@ def main(argv: list[str]) -> int:
 
 
 def parse_document(text: str) -> Node:
-    lines = text.replace("\r", "").split("\n") if text else ["+ [] [] Root"]
+    lines = text.replace("\r", "").split("\n") if text else ["+ [] [] [] Root"]
     stack: list[tuple[int, Node]] = []
     root: Node | None = None
 
@@ -79,16 +82,10 @@ def parse_document(text: str) -> Node:
             raise ValueError(f'Invalid SwiftMap line: "{raw_line}"')
 
         collapsed = match.group(1) == "-"
-        first_token = match.group(2)
-        second_token = match.group(3)
-        name = sanitize_name(match.group(4) or "")
-
-        if second_token is None:
-            tags, priority = split_legacy_aspects(parse_aspect_tokens(first_token, raw_line), first_token, raw_line)
-        else:
-            tags, priority = parse_aspect_pair(first_token, second_token, raw_line)
-
-        node = Node(name=name, collapsed=collapsed, tags=tags, priority=priority)
+        tokens = [match.group(2), match.group(3), match.group(4)]
+        name = sanitize_name(match.group(5) or "")
+        status, priority, tags = parse_aspects([token for token in tokens if token], raw_line)
+        node = Node(name=name, collapsed=collapsed, status=status, priority=priority, tags=tags)
 
         while stack and stack[-1][0] >= indent:
             stack.pop()
@@ -112,54 +109,22 @@ def parse_document(text: str) -> Node:
     return root
 
 
-def split_legacy_aspects(tokens: list[str], token: str, raw_line: str) -> tuple[list[str], str]:
-    tags = [token_name for token_name in tokens if is_tag(token_name)]
-    priority_tokens = [token_name for token_name in tokens if is_priority(token_name)]
-    if len(priority_tokens) > 1:
-        raise ValueError(f'Only one priority is allowed, got "{token}"')
+def parse_aspects(tokens: list[str], raw_line: str) -> tuple[str, str, list[str]]:
+    values = [value for token in tokens for value in parse_aspect_tokens(token, raw_line)]
+
+    status_values = [value for value in values if is_status(value)]
+    priority_values = [value for value in values if is_priority(value)]
+    tags = [value for value in values if is_tag(value)]
+
+    if len(status_values) > 1:
+        raise ValueError(f'Only one status is allowed, got "{raw_line}"')
+    if len(priority_values) > 1:
+        raise ValueError(f'Only one priority is allowed, got "{raw_line}"')
     if len(set(tags)) != len(tags):
-        raise ValueError(f'Duplicated tags token "{token}"')
+        raise ValueError(f'Duplicated tags token "{raw_line}"')
+
     tags = sorted(tags, key=tag_rank)
-    return tags, (priority_tokens[0] if priority_tokens else "")
-
-
-def parse_aspect_pair(first_token: str, second_token: str, raw_line: str) -> tuple[list[str], str]:
-    try:
-        priority = parse_priority_token(first_token, raw_line)
-        tags = parse_tags_token(second_token, raw_line)
-        return tags, priority
-    except ValueError as first_error:
-        try:
-            tags = parse_tags_token(first_token, raw_line)
-            priority = parse_priority_token(second_token, raw_line)
-            return tags, priority
-        except ValueError:
-            raise first_error
-
-
-def parse_tags_token(token: str, raw_line: str) -> list[str]:
-    tokens = parse_aspect_tokens(token, raw_line)
-    if any(is_priority(value) for value in tokens):
-        raise ValueError(f'Tags token cannot contain priority values, got "{token}"')
-    if tokens != sorted(tokens, key=tag_rank):
-        raise ValueError(f'Tags must be ordered as [Done,Rejected,Question,Task,Idea], got "{token}"')
-    if len(set(tokens)) != len(tokens):
-        raise ValueError(f'Duplicated tags token "{token}"')
-    return tokens
-
-
-def parse_priority_token(token: str, raw_line: str) -> str:
-    tokens = parse_aspect_tokens(token, raw_line)
-    if not tokens:
-        return ""
-    if len(tokens) != 1:
-        raise ValueError(f'Priority token can contain only one value, got "{token}"')
-    if not is_priority(tokens[0]):
-        raise ValueError(
-            'Priority token must be empty or one of [Low priority,Medium priority,High priority], '
-            f'got "{token}"'
-        )
-    return tokens[0]
+    return status_values[0] if status_values else "", priority_values[0] if priority_values else "", tags
 
 
 def parse_aspect_tokens(token: str, raw_line: str) -> list[str]:
@@ -175,10 +140,10 @@ def serialize_document(root: Node) -> str:
 
     def visit(node: Node, depth: int) -> None:
         indent = "  " * depth
-        status = "-" if node.collapsed else "+"
         priority = f"[{node.priority}]" if node.priority else "[]"
+        status = f"[{node.status}]" if node.status else "[]"
         tags = f"[{','.join(node.tags)}]" if node.tags else "[]"
-        lines.append(f"{indent}{status} {priority} {tags} {sanitize_name(node.name)}")
+        lines.append(f"{indent}{'-' if node.collapsed else '+'} {priority} {status} {tags} {sanitize_name(node.name)}")
         for child in node.children:
             visit(child, depth + 1)
 
@@ -197,19 +162,19 @@ def sanitize_name(value: str) -> str:
     return value.replace("\r", " ").replace("\n", " ").strip()
 
 
-def is_tag(token: str) -> bool:
-    return token in TAG_ORDER
+def is_status(token: str) -> bool:
+    return token in STATUS_ORDER
 
 
 def is_priority(token: str) -> bool:
     return token in PRIORITY_ORDER
 
 
+def is_tag(token: str) -> bool:
+    return token in TAG_ORDER
+
+
 def tag_rank(token: str) -> int:
-    return ASPECT_RANK[token]
-
-
-def aspect_rank(token: str) -> int:
     return ASPECT_RANK[token]
 
 

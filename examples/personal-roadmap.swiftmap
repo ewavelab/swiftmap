@@ -1,15 +1,15 @@
-+ [] [] Personal Roadmap
-  + [High priority] [] Health
-    + [] [Done] Book annual checkup
-    + [] [Task] Train three times a week
-    + [Low priority] [Question] Pick a new workout plan
-  + [Medium priority] [] Learning
-    + [] [] Read distributed systems notes
-    + [] [Done] Finish VS Code extension prototype
-    + [] [Question] Choose next course
-  + [Medium priority] [Idea] Travel
-    + [] [Task] Plan autumn trip
-    + [] [Task] Create shortlist of places
-  - [Low priority] [] Someday
-    + [Low priority] [Idea] Start a small side project
-    + [Low priority] [Rejected,Idea] Buy too much new hardware
++ [] [] [] Personal Roadmap
+  + [High priority] [] [] Health
+    + [] [Done] [] Book annual checkup
+    + [] [In progress] [Task] Train three times a week
+    + [Low priority] [Rejected] [Question] Pick a new workout plan
+  + [Medium priority] [] [] Learning
+    + [] [] [Question] Read distributed systems notes
+    + [] [Done] [] Finish VS Code extension prototype
+    + [] [] [Question] Choose next course
+  + [Medium priority] [In progress] [Idea] Travel
+    + [] [] [Task] Plan autumn trip
+    + [] [] [Task] Create shortlist of places
+  - [Low priority] [Rejected] [] Someday
+    + [Low priority] [In progress] [Idea] Start a small side project
+    + [Low priority] [Rejected] [Idea] Buy too much new hardware
