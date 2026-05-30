@@ -1463,9 +1463,18 @@
     });
 
     app.addEventListener('wheel', (event) => {
+      if (event.target.closest('.context-menu')) {
+        return;
+      }
       event.preventDefault();
-      const delta = event.deltaY < 0 ? 1.08 : 0.92;
-      zoomAt(state.zoom * delta, event.clientX, event.clientY);
+      if (event.ctrlKey || event.metaKey) {
+        const delta = event.deltaY < 0 ? 1.08 : 0.92;
+        zoomAt(state.zoom * delta, event.clientX, event.clientY);
+        return;
+      }
+      state.panX -= event.deltaX;
+      state.panY -= event.deltaY;
+      setTransform();
     }, { passive: false });
 
     window.addEventListener('keydown', (event) => {
