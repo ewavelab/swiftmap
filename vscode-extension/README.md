@@ -22,6 +22,16 @@ Home page: https://swiftmap.pages.dev/
   - `Space` - Toggle collapse/expand
   - `Ctrl + Up/Down` - Reorder nodes
 
+### Example Visualizations
+
+#### Project Planning
+
+![Project Planning Mind Map](resources/project-planning.png)
+
+#### Personal Roadmap
+
+![Personal Roadmap Mind Map](resources/personal-roadmap.png)
+
 ## Getting Started
 
 ### Create a New Mind Map

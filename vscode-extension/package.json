@@ -2,7 +2,7 @@
   "name": "swiftmap",
   "displayName": "SwiftMap",
   "description": "Minimal mind map editor for Visual Studio Code.",
-  "version": "0.9.1",
+  "version": "1.0.0",
   "icon": "resources/icon.png",
   "publisher": "ewavelab",
   "license": "GPL-3.0-only",
