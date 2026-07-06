@@ -26,11 +26,11 @@ Home page: https://swiftmap.pages.dev/
 
 #### Project Planning
 
-![Project Planning Mind Map](resources/project-planning.png)
+![Project Planning Mind Map](https://swiftmap.pages.dev/assets/project-planning.png)
 
 #### Personal Roadmap
 
-![Personal Roadmap Mind Map](resources/personal-roadmap.png)
+![Personal Roadmap Mind Map](https://swiftmap.pages.dev/assets/personal-roadmap.png)
 
 ## Getting Started
 
