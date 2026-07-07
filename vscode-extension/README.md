@@ -14,13 +14,7 @@ Home page: https://swiftmap.pages.dev/
 - **Undo/Redo** - Full undo/redo support with keyboard shortcuts  
 - **Export** - Export your mind maps as PNG images  
 - **Auto Layout** - Automatic hierarchical layout - just focus on content  
-- **Keyboard Friendly** - Quick keyboard shortcuts for power users:
-  - `Shift + Enter` - Add child node
-  - `Alt + Enter` - Add sibling node below
-  - `Shift + Alt + Enter` - Add sibling node above
-  - `Ctrl + Z / Ctrl + Y` - Undo/Redo
-  - `Space` - Toggle collapse/expand
-  - `Ctrl + Up/Down` - Reorder nodes
+- **Keyboard Friendly** - Quick keyboard shortcuts for power users
 
 ### Example Visualizations
 
@@ -38,7 +32,7 @@ Home page: https://swiftmap.pages.dev/
 
 1. Open VS Code command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`)
 2. Type "SwiftMap: New Mind Map"
-3. Start organizing your thoughts!
+3. Start organizing your thoughts
 
 ### Open Existing Files
 
@@ -49,26 +43,11 @@ Simply open any `.swiftmap` file - it automatically opens in the visual editor.
 - **Visual Editor → Source**: Click the "Open Source" icon in the editor title bar
 - **Source → Visual Editor**: Click the "Open Visual Editor" icon in the editor title bar
 
-## Keyboard Shortcuts
-
-| Action | Shortcut |
-|--------|----------|
-| Edit node | `Enter` or `F2` |
-| Add child node | `Shift + Enter` |
-| Add sibling below | `Alt + Enter` |
-| Add sibling above | `Shift + Alt + Enter` |
-| Delete node | `Delete` |
-| Toggle collapse | `Space` |
-| Move up | `Ctrl + Up` |
-| Move down | `Ctrl + Down` |
-| Undo | `Ctrl + Z` |
-| Redo | `Ctrl + Y` |
-
 ## Status & Priority Management
 
-- **Status**: `Ctrl+Alt+4` = In Progress, `Ctrl+Alt+5` = Blocked, `Ctrl+Alt+6` = Done, `Ctrl+Alt+7` = Rejected
-- **Priority**: `Ctrl+Alt+1` = Low, `Ctrl+Alt+2` = Medium, `Ctrl+Alt+3` = High
-- **Tags**: `Ctrl+Alt+8` = Question, `Ctrl+Alt+9` = Task, `Ctrl+Alt+0` = Idea
+- **Status**: In Progress, Blocked, Done, Rejected
+- **Priority**: Low, Medium, High
+- **Tags**: Question, Task, Idea
 
 Or use the right-click context menu for easy access to all options.
 
@@ -96,12 +75,7 @@ SwiftMap uses a simple, text-based format that's easy to version control and sha
 
 - [Project Repository](https://github.com/ewavelab/swiftmap)
 - [File Format Specification](https://github.com/ewavelab/swiftmap)
-- [Examples](https://github.com/ewavelab/swiftmap)
 
 ## License
 
 GPL-3.0
-
----
-
-**Ready to organize your thoughts?** Install SwiftMap now and experience a new way to mind map! 🚀
